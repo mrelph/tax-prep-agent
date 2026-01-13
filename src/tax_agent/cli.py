@@ -24,10 +24,12 @@ documents_app = typer.Typer(help="Manage collected tax documents")
 config_app = typer.Typer(help="Manage configuration")
 research_app = typer.Typer(help="Research current tax code and rules")
 drive_app = typer.Typer(help="Google Drive integration")
+ai_app = typer.Typer(help="Advanced AI-powered tax analysis")
 app.add_typer(documents_app, name="documents")
 app.add_typer(config_app, name="config")
 app.add_typer(research_app, name="research")
 app.add_typer(drive_app, name="drive")
+app.add_typer(ai_app, name="ai")
 
 
 @app.command()
@@ -726,6 +728,646 @@ def review(
             rprint("")
     else:
         rprint("\n[green]No issues found in the tax return.[/green]")
+
+
+# =============================================================================
+# AI Analysis Commands
+# =============================================================================
+
+
+@ai_app.command("validate")
+def ai_validate(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Cross-validate all collected documents for consistency."""
+    from tax_agent.agent import get_agent
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    if not documents:
+        rprint(f"[yellow]No documents collected for tax year {tax_year}.[/yellow]")
+        raise typer.Exit(1)
+
+    # Prepare document data for validation
+    docs_data = []
+    for doc in documents:
+        docs_data.append({
+            "id": doc.id[:8],
+            "type": doc.document_type.value,
+            "issuer": doc.issuer_name,
+            "extracted_data": doc.extracted_data,
+        })
+
+    rprint(f"[cyan]Validating {len(documents)} documents for tax year {tax_year}...[/cyan]")
+
+    agent = get_agent()
+    with console.status("[bold green]Running AI cross-validation analysis..."):
+        result = agent.validate_documents_cross_reference(docs_data)
+
+    # Display results
+    status_colors = {
+        "pass": "green",
+        "warnings": "yellow",
+        "errors": "red",
+    }
+    status_color = status_colors.get(result.get("validation_status", ""), "white")
+
+    rprint(Panel.fit(
+        f"[bold]Validation Status: [{status_color}]{result.get('validation_status', 'unknown').upper()}[/{status_color}][/bold]\n"
+        f"Consistency Score: {result.get('consistency_score', 0):.0%}",
+        title="Cross-Document Validation"
+    ))
+
+    # Show summary
+    summary = result.get("summary", {})
+    if summary:
+        sum_table = Table(title="Document Summary")
+        sum_table.add_column("Metric", style="cyan")
+        sum_table.add_column("Amount", style="green", justify="right")
+
+        if summary.get("total_wages"):
+            sum_table.add_row("Total Wages", f"${summary['total_wages']:,.2f}")
+        if summary.get("total_federal_withholding"):
+            sum_table.add_row("Federal Withholding", f"${summary['total_federal_withholding']:,.2f}")
+        if summary.get("total_interest_income"):
+            sum_table.add_row("Interest Income", f"${summary['total_interest_income']:,.2f}")
+        if summary.get("total_dividend_income"):
+            sum_table.add_row("Dividend Income", f"${summary['total_dividend_income']:,.2f}")
+        if summary.get("total_capital_gains"):
+            sum_table.add_row("Capital Gains", f"${summary['total_capital_gains']:,.2f}")
+
+        console.print(sum_table)
+
+    # Show issues
+    issues = result.get("issues", [])
+    if issues:
+        rprint("\n[bold]Issues Found:[/bold]")
+        for issue in issues:
+            severity = issue.get("severity", "info")
+            color = {"error": "red", "warning": "yellow", "info": "blue"}.get(severity, "white")
+            rprint(f"  [{color}]{severity.upper()}[/{color}]: {issue.get('description', '')}")
+            if issue.get("recommended_action"):
+                rprint(f"    [dim]Action: {issue['recommended_action']}[/dim]")
+
+    # Show missing documents
+    missing = result.get("missing_documents", [])
+    if missing:
+        rprint("\n[bold yellow]Potentially Missing Documents:[/bold yellow]")
+        for doc in missing:
+            importance_color = {"high": "red", "medium": "yellow", "low": "blue"}.get(
+                doc.get("importance", ""), "white"
+            )
+            rprint(f"  [{importance_color}]{doc.get('document_type', '')}[/{importance_color}]: {doc.get('reason', '')}")
+
+
+@ai_app.command("audit-risk")
+def ai_audit_risk(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Assess audit risk based on collected documents."""
+    from tax_agent.agent import get_agent
+    from tax_agent.storage.database import get_database
+    from tax_agent.analyzers.implications import TaxAnalyzer
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    if not documents:
+        rprint(f"[yellow]No documents collected for tax year {tax_year}.[/yellow]")
+        raise typer.Exit(1)
+
+    # Build summaries
+    analyzer = TaxAnalyzer(tax_year)
+    income_summary = analyzer.calculate_income_summary(documents)
+
+    docs_summary = []
+    for doc in documents:
+        docs_summary.append({
+            "type": doc.document_type.value,
+            "issuer": doc.issuer_name,
+            "data": doc.extracted_data,
+        })
+
+    return_summary = {
+        "tax_year": tax_year,
+        "income": income_summary,
+        "filing_status": config.get("filing_status", "single"),
+        "state": config.state,
+    }
+
+    rprint(f"[cyan]Assessing audit risk for tax year {tax_year}...[/cyan]")
+
+    agent = get_agent()
+    with console.status("[bold green]Running AI audit risk assessment..."):
+        result = agent.assess_audit_risk(return_summary, {"documents": docs_summary})
+
+    # Display results
+    risk_level = result.get("risk_level", "unknown")
+    risk_score = result.get("overall_risk_score", 5)
+    risk_colors = {
+        "low": "green",
+        "moderate": "yellow",
+        "elevated": "yellow",
+        "high": "red",
+    }
+    color = risk_colors.get(risk_level, "white")
+
+    # Visual risk meter
+    risk_bar = "█" * risk_score + "░" * (10 - risk_score)
+
+    rprint(Panel.fit(
+        f"[bold]Audit Risk Level: [{color}]{risk_level.upper()}[/{color}][/bold]\n\n"
+        f"Risk Score: [{color}]{risk_bar}[/{color}] {risk_score}/10\n\n"
+        f"{result.get('audit_probability_estimate', '')}",
+        title="Audit Risk Assessment"
+    ))
+
+    # Risk factors
+    risk_factors = result.get("risk_factors", [])
+    if risk_factors:
+        rprint("\n[bold red]Risk Factors:[/bold red]")
+        for factor in sorted(risk_factors, key=lambda x: x.get("risk_contribution", 0), reverse=True):
+            contribution = factor.get("risk_contribution", 0)
+            bar = "▓" * contribution + "░" * (10 - contribution)
+            rprint(f"  [{bar}] {factor.get('factor', '')}")
+            rprint(f"    [dim]{factor.get('explanation', '')}[/dim]")
+            if factor.get("mitigation"):
+                rprint(f"    [green]Mitigation: {factor['mitigation']}[/green]")
+
+    # Protective factors
+    protective = result.get("protective_factors", [])
+    if protective:
+        rprint("\n[bold green]Protective Factors:[/bold green]")
+        for factor in protective:
+            rprint(f"  [green]✓[/green] {factor.get('factor', '')}")
+
+    # Documentation recommendations
+    doc_recs = result.get("documentation_recommendations", [])
+    if doc_recs:
+        rprint("\n[bold cyan]Documentation Recommendations:[/bold cyan]")
+        for rec in doc_recs:
+            priority_color = {"high": "red", "medium": "yellow", "low": "blue"}.get(
+                rec.get("priority", ""), "white"
+            )
+            rprint(f"  [{priority_color}]●[/{priority_color}] {rec.get('item', '')}")
+            rprint(f"    [dim]{rec.get('reason', '')}[/dim]")
+
+    # Summary
+    if result.get("summary"):
+        rprint(f"\n[bold]Assessment:[/bold] {result['summary']}")
+
+
+@ai_app.command("scenarios")
+def ai_scenarios(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Compare different filing scenarios to find optimal strategy."""
+    from tax_agent.agent import get_agent
+    from tax_agent.storage.database import get_database
+    from tax_agent.analyzers.implications import TaxAnalyzer
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    if not documents:
+        rprint(f"[yellow]No documents collected for tax year {tax_year}.[/yellow]")
+        raise typer.Exit(1)
+
+    # Calculate income and deductions
+    analyzer = TaxAnalyzer(tax_year)
+    income_data = analyzer.calculate_income_summary(documents)
+    income_data["total"] = sum(income_data.values())
+
+    # Get profile deduction info
+    deductions_data = {
+        "state_taxes_paid": 0,
+        "mortgage_interest": 0,
+        "charitable_contributions": 0,
+        "medical_expenses": 0,
+        "salt_cap": 10000,
+    }
+
+    rprint(f"[cyan]Comparing filing scenarios for tax year {tax_year}...[/cyan]")
+
+    agent = get_agent()
+    with console.status("[bold green]Running AI scenario comparison..."):
+        result = agent.compare_filing_scenarios(income_data, deductions_data, tax_year)
+
+    # Display optimal strategy
+    optimal = result.get("optimal_strategy", {})
+    if optimal:
+        rprint(Panel.fit(
+            f"[bold green]Recommended: {optimal.get('filing_status', 'N/A')}[/bold green]\n"
+            f"Deduction Method: {optimal.get('deduction_method', 'N/A').title()}\n"
+            f"Estimated Tax: ${optimal.get('estimated_tax', 0):,.2f}\n\n"
+            f"[bold]Key Reasons:[/bold]\n" +
+            "\n".join(f"  • {r}" for r in optimal.get("key_reasons", [])),
+            title="Optimal Strategy"
+        ))
+
+    # Scenario comparison table
+    scenarios = result.get("scenario_comparison", [])
+    if scenarios:
+        table = Table(title="Scenario Comparison")
+        table.add_column("Scenario", style="cyan")
+        table.add_column("Est. Tax", style="white", justify="right")
+        table.add_column("Eff. Rate", style="white", justify="right")
+        table.add_column("vs Optimal", style="white", justify="right")
+
+        for scenario in scenarios:
+            diff = scenario.get("vs_optimal_difference", 0)
+            diff_str = f"+${diff:,.0f}" if diff > 0 else f"-${abs(diff):,.0f}" if diff < 0 else "BEST"
+            diff_color = "red" if diff > 0 else "green" if diff < 0 else "bold green"
+
+            table.add_row(
+                scenario.get("scenario_name", ""),
+                f"${scenario.get('estimated_tax', 0):,.2f}",
+                scenario.get("effective_rate", "N/A"),
+                f"[{diff_color}]{diff_str}[/{diff_color}]",
+            )
+
+        console.print(table)
+
+    # Timing recommendations
+    timing = result.get("timing_recommendations", [])
+    if timing:
+        rprint("\n[bold]Timing Recommendations:[/bold]")
+        for rec in timing:
+            priority_color = {"high": "red", "medium": "yellow", "low": "blue"}.get(
+                rec.get("priority", ""), "white"
+            )
+            impact = rec.get("tax_impact", 0)
+            impact_str = f"[green]saves ${abs(impact):,.0f}[/green]" if impact < 0 else f"[yellow]costs ${impact:,.0f}[/yellow]"
+            rprint(f"  [{priority_color}]●[/{priority_color}] {rec.get('action', '')} - {impact_str}")
+            if rec.get("deadline"):
+                rprint(f"    [dim]Deadline: {rec['deadline']}[/dim]")
+
+    # Summary
+    if result.get("summary"):
+        rprint(f"\n[bold]Summary:[/bold] {result['summary']}")
+
+
+@ai_app.command("missing")
+def ai_missing(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Identify potentially missing tax documents."""
+    from tax_agent.agent import get_agent
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    # Build document summary
+    docs_summary = []
+    for doc in documents:
+        docs_summary.append({
+            "type": doc.document_type.value,
+            "issuer": doc.issuer_name,
+            "data_keys": list(doc.extracted_data.keys()) if doc.extracted_data else [],
+        })
+
+    # Build profile
+    profile = {
+        "tax_year": tax_year,
+        "state": config.state,
+        "filing_status": config.get("filing_status"),
+        "documents_collected": len(documents),
+    }
+
+    rprint(f"[cyan]Analyzing document collection for tax year {tax_year}...[/cyan]")
+
+    agent = get_agent()
+    with console.status("[bold green]Running AI missing document analysis..."):
+        result = agent.identify_missing_documents(docs_summary, profile)
+
+    # Display completeness score
+    score = result.get("collection_completeness_score", 0)
+    score_color = "green" if score >= 0.8 else "yellow" if score >= 0.5 else "red"
+    ready = result.get("ready_to_file", False)
+
+    rprint(Panel.fit(
+        f"[bold]Collection Completeness: [{score_color}]{score:.0%}[/{score_color}][/bold]\n"
+        f"Ready to File: {'[green]Yes[/green]' if ready else '[red]No[/red]'}",
+        title="Document Collection Status"
+    ))
+
+    # Missing documents
+    missing = result.get("likely_missing", [])
+    if missing:
+        rprint("\n[bold yellow]Potentially Missing Documents:[/bold yellow]")
+        for doc in missing:
+            importance = doc.get("importance", "medium")
+            color = {"critical": "red", "high": "red", "medium": "yellow", "low": "blue"}.get(importance, "white")
+            irs_risk = "[red]⚠ IRS Match[/red]" if doc.get("irs_matching_risk") else ""
+
+            rprint(f"\n  [{color}]{doc.get('document_type', '')}[/{color}] {irs_risk}")
+            rprint(f"    [dim]Reason: {doc.get('reason', '')}[/dim]")
+            rprint(f"    [dim]Source: {doc.get('typical_source', '')}[/dim]")
+            if doc.get("deadline_concern"):
+                rprint(f"    [yellow]⏰ {doc['deadline_concern']}[/yellow]")
+    else:
+        rprint("\n[green]No obviously missing documents detected![/green]")
+
+    # Blocking documents
+    blocking = result.get("blocking_documents", [])
+    if blocking:
+        rprint("\n[bold red]Blocking Documents (needed before filing):[/bold red]")
+        for doc in blocking:
+            rprint(f"  [red]✗[/red] {doc}")
+
+    # Nice to have
+    nice = result.get("nice_to_have_documents", [])
+    if nice:
+        rprint("\n[bold blue]Nice to Have:[/bold blue]")
+        for doc in nice:
+            rprint(f"  [blue]○[/blue] {doc}")
+
+    # Verification suggestions
+    verifications = result.get("verification_suggestions", [])
+    if verifications:
+        rprint("\n[bold]Verification Steps:[/bold]")
+        for v in verifications:
+            rprint(f"  • {v.get('check', '')}")
+            rprint(f"    [dim]{v.get('how', '')}[/dim]")
+
+    # Summary
+    if result.get("summary"):
+        rprint(f"\n[bold]Assessment:[/bold] {result['summary']}")
+
+
+@ai_app.command("investments")
+def ai_investments(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Deep AI analysis of investment taxes (capital gains, wash sales, harvesting)."""
+    from tax_agent.agent import get_agent
+    from tax_agent.storage.database import get_database
+    from tax_agent.models.documents import DocumentType
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    # Find 1099-B documents
+    brokerage_docs = [d for d in documents if d.document_type == DocumentType.FORM_1099_B]
+
+    if not brokerage_docs:
+        rprint(f"[yellow]No 1099-B documents found for tax year {tax_year}.[/yellow]")
+        rprint("[dim]Collect brokerage statements first using 'tax-agent collect'[/dim]")
+        raise typer.Exit(1)
+
+    # Extract transactions
+    all_transactions = []
+    for doc in brokerage_docs:
+        if doc.extracted_data and "transactions" in doc.extracted_data:
+            for txn in doc.extracted_data["transactions"]:
+                txn["broker"] = doc.issuer_name
+                all_transactions.append(txn)
+
+    if not all_transactions:
+        rprint("[yellow]No transactions found in 1099-B documents.[/yellow]")
+        raise typer.Exit(1)
+
+    rprint(f"[cyan]Analyzing {len(all_transactions)} investment transactions for tax year {tax_year}...[/cyan]")
+
+    agent = get_agent()
+    with console.status("[bold green]Running AI investment tax analysis..."):
+        result = agent.analyze_investment_taxes(all_transactions)
+
+    # Capital gains summary
+    cg = result.get("capital_gains_summary", {})
+    if cg:
+        rprint(Panel.fit(
+            f"[bold]Capital Gains Summary[/bold]\n\n"
+            f"Short-term Gains:  [green]${cg.get('short_term_gains', 0):,.2f}[/green]\n"
+            f"Short-term Losses: [red]${cg.get('short_term_losses', 0):,.2f}[/red]\n"
+            f"[bold]Net Short-term:    ${cg.get('net_short_term', 0):,.2f}[/bold]\n\n"
+            f"Long-term Gains:   [green]${cg.get('long_term_gains', 0):,.2f}[/green]\n"
+            f"Long-term Losses:  [red]${cg.get('long_term_losses', 0):,.2f}[/red]\n"
+            f"[bold]Net Long-term:     ${cg.get('net_long_term', 0):,.2f}[/bold]\n\n"
+            f"[bold cyan]Total Net Gain/Loss: ${cg.get('total_net_gain_loss', 0):,.2f}[/bold cyan]",
+            title="Investment Summary"
+        ))
+
+    # Wash sales
+    wash_sales = result.get("wash_sales", [])
+    if wash_sales:
+        rprint("\n[bold red]⚠ Wash Sale Violations Detected:[/bold red]")
+        for ws in wash_sales:
+            rprint(f"\n  [red]{ws.get('security', '')}[/red]")
+            rprint(f"    Sold: {ws.get('sale_date', '')} | Repurchased: {ws.get('repurchase_date', '')}")
+            rprint(f"    [red]Disallowed Loss: ${ws.get('disallowed_loss', 0):,.2f}[/red]")
+            rprint(f"    [dim]{ws.get('action_required', '')}[/dim]")
+    else:
+        rprint("\n[green]✓ No wash sale violations detected[/green]")
+
+    # Tax-loss harvesting opportunities
+    harvesting = result.get("harvesting_opportunities", [])
+    if harvesting:
+        rprint("\n[bold green]Tax-Loss Harvesting Opportunities:[/bold green]")
+        for opp in harvesting:
+            rprint(f"\n  [cyan]{opp.get('security', '')}[/cyan]")
+            rprint(f"    Current Loss: [red]${opp.get('current_loss', 0):,.2f}[/red]")
+            rprint(f"    [green]Potential Tax Savings: ${opp.get('tax_savings_estimate', 0):,.2f}[/green]")
+            if opp.get("replacement_suggestions"):
+                rprint(f"    [dim]Replacements: {', '.join(opp['replacement_suggestions'])}[/dim]")
+
+    # NIIT Analysis
+    niit = result.get("niit_analysis", {})
+    if niit.get("applies"):
+        rprint(f"\n[yellow]⚠ Net Investment Income Tax (3.8%) Applies[/yellow]")
+        rprint(f"   Estimated NIIT: ${niit.get('estimated_niit', 0):,.2f}")
+        if niit.get("mitigation_strategies"):
+            rprint(f"   [dim]Strategies: {', '.join(niit['mitigation_strategies'])}[/dim]")
+
+    # Estimated tax
+    est_tax = result.get("estimated_tax", {})
+    if est_tax:
+        rprint(Panel.fit(
+            f"[bold]Estimated Investment Taxes[/bold]\n\n"
+            f"Short-term Tax (ordinary rates): ${est_tax.get('short_term_tax', 0):,.2f}\n"
+            f"Long-term Tax (0/15/20%):        ${est_tax.get('long_term_tax', 0):,.2f}\n"
+            f"NIIT (3.8%):                     ${est_tax.get('niit', 0):,.2f}\n"
+            f"[bold]Total Federal:                   ${est_tax.get('total_federal', 0):,.2f}[/bold]\n\n"
+            f"Effective Rate: {est_tax.get('effective_rate', 'N/A')}",
+            title="Tax Estimate"
+        ))
+
+    # Optimization actions
+    actions = result.get("optimization_actions", [])
+    if actions:
+        rprint("\n[bold]Optimization Actions:[/bold]")
+        for action in actions:
+            priority_color = {"high": "red", "medium": "yellow", "low": "blue"}.get(
+                action.get("priority", ""), "white"
+            )
+            rprint(f"\n  [{priority_color}]●[/{priority_color}] {action.get('action', '')}")
+            rprint(f"    [green]Potential Savings: ${action.get('potential_savings', 0):,.2f}[/green]")
+            if action.get("deadline"):
+                rprint(f"    [dim]Deadline: {action['deadline']}[/dim]")
+
+    # Summary
+    if result.get("summary"):
+        rprint(f"\n[bold]Summary:[/bold] {result['summary']}")
+
+
+@ai_app.command("plan")
+def ai_plan(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Generate forward-looking tax planning recommendations."""
+    from tax_agent.agent import get_agent
+    from tax_agent.storage.database import get_database
+    from tax_agent.analyzers.implications import TaxAnalyzer
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    # Build current year data
+    analyzer = TaxAnalyzer(tax_year)
+    income_summary = analyzer.calculate_income_summary(documents) if documents else {}
+
+    current_year_data = {
+        "tax_year": tax_year,
+        "income": income_summary,
+        "total_income": sum(income_summary.values()) if income_summary else 0,
+        "documents_count": len(documents),
+    }
+
+    profile = {
+        "state": config.state,
+        "filing_status": config.get("filing_status", "single"),
+    }
+
+    rprint(f"[cyan]Generating tax planning recommendations for {tax_year} and beyond...[/cyan]")
+
+    agent = get_agent()
+    with console.status("[bold green]Running AI tax planning analysis..."):
+        result = agent.generate_tax_planning_recommendations(current_year_data, profile)
+
+    # Immediate actions
+    immediate = result.get("immediate_actions", [])
+    if immediate:
+        rprint(Panel.fit(
+            "[bold]Immediate Actions Required[/bold]\n\n" +
+            "\n".join(
+                f"[{'red' if a.get('priority') == 'critical' else 'yellow'}]● {a.get('action', '')}[/{'red' if a.get('priority') == 'critical' else 'yellow'}]\n"
+                f"   Deadline: {a.get('deadline', 'N/A')} | Benefit: [green]${a.get('estimated_benefit', 0):,.0f}[/green]"
+                for a in immediate[:5]
+            ),
+            title="⚡ Action Items"
+        ))
+
+    # Quarterly estimated taxes
+    quarterly = result.get("quarterly_estimated_taxes", {})
+    if quarterly.get("required"):
+        rprint(Panel.fit(
+            f"[bold yellow]Quarterly Estimated Taxes Required[/bold yellow]\n\n"
+            f"Next Payment Due: {quarterly.get('next_payment_due', 'N/A')}\n"
+            f"Recommended Amount: [bold]${quarterly.get('recommended_amount', 0):,.2f}[/bold]\n\n"
+            f"[dim]{quarterly.get('safe_harbor_method', '')}[/dim]",
+            title="Estimated Taxes"
+        ))
+
+    # Retirement strategy
+    retirement = result.get("retirement_strategy", {})
+    if retirement:
+        rprint("\n[bold cyan]Retirement Contribution Strategy:[/bold cyan]")
+        if retirement.get("recommended_401k_contribution"):
+            rprint(f"  401(k): [green]${retirement['recommended_401k_contribution']:,.0f}[/green]")
+        if retirement.get("recommended_ira_contribution"):
+            ira_type = retirement.get("ira_type_recommendation", "")
+            rprint(f"  IRA ({ira_type}): [green]${retirement['recommended_ira_contribution']:,.0f}[/green]")
+        if retirement.get("backdoor_roth_eligible"):
+            rprint("  [yellow]✓ Backdoor Roth eligible - consider this strategy[/yellow]")
+        for rec in retirement.get("additional_recommendations", []):
+            rprint(f"  • {rec}")
+
+    # Investment strategy
+    investment = result.get("investment_strategy", [])
+    if investment:
+        rprint("\n[bold]Investment Tax Strategy:[/bold]")
+        for rec in investment:
+            rprint(f"  • {rec.get('recommendation', '')}")
+            rprint(f"    [dim]{rec.get('rationale', '')}[/dim]")
+            if rec.get("estimated_annual_benefit"):
+                rprint(f"    [green]Annual Benefit: ${rec['estimated_annual_benefit']:,.0f}[/green]")
+
+    # Next year projections
+    projections = result.get("next_year_projections", {})
+    if projections:
+        rprint(Panel.fit(
+            f"[bold]Projected for Next Year[/bold]\n\n"
+            f"Estimated Income: ${projections.get('estimated_income', 0):,.0f}\n"
+            f"Estimated Tax: ${projections.get('estimated_tax', 0):,.0f}\n\n"
+            f"[bold]Key Opportunities:[/bold]\n" +
+            "\n".join(f"  • {o}" for o in projections.get("key_planning_opportunities", [])),
+            title="📈 Next Year"
+        ))
+
+    # Long-term strategies
+    long_term = result.get("long_term_strategies", [])
+    if long_term:
+        rprint("\n[bold]Long-Term Tax Strategies:[/bold]")
+        for strategy in long_term:
+            rprint(f"\n  [cyan]{strategy.get('strategy', '')}[/cyan]")
+            rprint(f"    Timeline: {strategy.get('timeline', 'N/A')}")
+            rprint(f"    [green]Cumulative Benefit: {strategy.get('cumulative_benefit', 'N/A')}[/green]")
+
+    # Warnings
+    warnings = result.get("warnings", [])
+    if warnings:
+        rprint("\n[bold yellow]⚠ Important Considerations:[/bold yellow]")
+        for warn in warnings:
+            rprint(f"  [yellow]• {warn}[/yellow]")
+
+    # Summary
+    if result.get("summary"):
+        rprint(f"\n[bold]Planning Summary:[/bold] {result['summary']}")
 
 
 # Document subcommands
