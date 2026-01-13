@@ -169,6 +169,57 @@ class DocumentCollector:
 
         return results
 
+    def process_google_drive_folder(
+        self,
+        folder_id: str,
+        tax_year: int | None = None,
+        recursive: bool = False,
+    ) -> list[tuple[str, TaxDocument | Exception]]:
+        """
+        Process all supported files from a Google Drive folder.
+
+        Args:
+            folder_id: Google Drive folder ID
+            tax_year: Tax year (defaults to config)
+            recursive: If True, include files from subfolders
+
+        Returns:
+            List of (filename, result) tuples where result is TaxDocument or Exception
+        """
+        from tax_agent.collectors.google_drive import get_google_drive_collector
+
+        tax_year = tax_year or self.config.tax_year
+        drive_collector = get_google_drive_collector()
+
+        if not drive_collector.is_authenticated():
+            raise ValueError(
+                "Not authenticated with Google Drive. "
+                "Run 'tax-agent drive-auth' first."
+            )
+
+        # Get list of files
+        files = drive_collector.list_files(folder_id, recursive=recursive)
+
+        results: list[tuple[str, TaxDocument | Exception]] = []
+
+        for drive_file in files:
+            try:
+                # Download to temp file
+                temp_path = drive_collector.download_to_temp_file(drive_file)
+
+                try:
+                    # Process through standard pipeline
+                    doc = self.process_file(temp_path, tax_year)
+                    results.append((drive_file.name, doc))
+                finally:
+                    # Clean up temp file
+                    temp_path.unlink(missing_ok=True)
+
+            except Exception as e:
+                results.append((drive_file.name, e))
+
+        return results
+
 
 def collect_document(file_path: str | Path, tax_year: int | None = None) -> TaxDocument:
     """

@@ -16,6 +16,8 @@ KEYRING_API_KEY = "anthropic-api-key"
 KEYRING_AWS_ACCESS_KEY = "aws-access-key-id"
 KEYRING_AWS_SECRET_KEY = "aws-secret-access-key"
 KEYRING_DB_PASSWORD = "db-encryption-key"
+KEYRING_GOOGLE_CREDENTIALS = "google-drive-credentials"
+KEYRING_GOOGLE_CLIENT_CONFIG = "google-drive-client-config"
 
 # Supported AI providers
 AI_PROVIDER_ANTHROPIC = "anthropic"
@@ -111,6 +113,43 @@ class Config:
             keyring.delete_password(KEYRING_SERVICE, KEYRING_AWS_SECRET_KEY)
         except keyring.errors.PasswordDeleteError:
             pass
+
+    def get_google_credentials(self) -> dict | None:
+        """Get Google OAuth credentials from the system keyring."""
+        creds_json = keyring.get_password(KEYRING_SERVICE, KEYRING_GOOGLE_CREDENTIALS)
+        if creds_json:
+            return json.loads(creds_json)
+        return None
+
+    def set_google_credentials(self, credentials: dict) -> None:
+        """Store Google OAuth credentials in the system keyring."""
+        keyring.set_password(
+            KEYRING_SERVICE, KEYRING_GOOGLE_CREDENTIALS, json.dumps(credentials)
+        )
+
+    def get_google_client_config(self) -> dict | None:
+        """Get Google OAuth client configuration from the system keyring."""
+        config_json = keyring.get_password(KEYRING_SERVICE, KEYRING_GOOGLE_CLIENT_CONFIG)
+        if config_json:
+            return json.loads(config_json)
+        return None
+
+    def set_google_client_config(self, client_config: dict) -> None:
+        """Store Google OAuth client configuration in the system keyring."""
+        keyring.set_password(
+            KEYRING_SERVICE, KEYRING_GOOGLE_CLIENT_CONFIG, json.dumps(client_config)
+        )
+
+    def clear_google_credentials(self) -> None:
+        """Remove Google credentials from the keyring."""
+        try:
+            keyring.delete_password(KEYRING_SERVICE, KEYRING_GOOGLE_CREDENTIALS)
+        except keyring.errors.PasswordDeleteError:
+            pass
+
+    def has_google_drive_configured(self) -> bool:
+        """Check if Google Drive integration is configured."""
+        return self.get_google_credentials() is not None
 
     @property
     def ai_provider(self) -> str:

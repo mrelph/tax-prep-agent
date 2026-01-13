@@ -23,9 +23,11 @@ console = Console()
 documents_app = typer.Typer(help="Manage collected tax documents")
 config_app = typer.Typer(help="Manage configuration")
 research_app = typer.Typer(help="Research current tax code and rules")
+drive_app = typer.Typer(help="Google Drive integration")
 app.add_typer(documents_app, name="documents")
 app.add_typer(config_app, name="config")
 app.add_typer(research_app, name="research")
+app.add_typer(drive_app, name="drive")
 
 
 @app.command()
@@ -1035,6 +1037,242 @@ def research_state(
             rprint("\n[bold yellow]Recent Changes:[/bold yellow]")
             for change in result["recent_changes"]:
                 rprint(f"  - {change}")
+
+
+# =============================================================================
+# Google Drive Commands
+# =============================================================================
+
+
+@drive_app.command(name="auth")
+def drive_auth(
+    setup: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--setup",
+            "-s",
+            help="Path to Google OAuth client_secrets.json file for initial setup",
+        ),
+    ] = None,
+    revoke: Annotated[
+        bool, typer.Option("--revoke", "-r", help="Revoke stored Google credentials")
+    ] = False,
+) -> None:
+    """Authenticate with Google Drive."""
+    from tax_agent.collectors.google_drive import GoogleDriveCollector
+
+    config = get_config()
+
+    if revoke:
+        config.clear_google_credentials()
+        rprint("[green]Google Drive credentials have been removed.[/green]")
+        return
+
+    collector = GoogleDriveCollector()
+
+    if setup:
+        # Initial setup with client secrets file
+        if not setup.exists():
+            rprint(f"[red]File not found: {setup}[/red]")
+            raise typer.Exit(1)
+
+        rprint("[cyan]Setting up Google Drive integration...[/cyan]")
+        rprint(
+            "[dim]This will open a browser window for you to authorize access.[/dim]"
+        )
+
+        try:
+            collector.authenticate_with_client_file(setup)
+            rprint("[green]Google Drive authentication successful![/green]")
+            rprint(
+                "\n[cyan]You can now use:[/cyan]"
+                "\n  tax-agent drive collect <folder-id>  - Process documents from a folder"
+                "\n  tax-agent drive list                 - List your folders"
+            )
+        except Exception as e:
+            rprint(f"[red]Authentication failed: {e}[/red]")
+            raise typer.Exit(1)
+    else:
+        # Re-authenticate using stored client config
+        if collector.is_authenticated():
+            rprint("[green]Already authenticated with Google Drive.[/green]")
+            if Confirm.ask("Re-authenticate?", default=False):
+                try:
+                    collector.authenticate_interactive()
+                    rprint("[green]Re-authentication successful![/green]")
+                except Exception as e:
+                    rprint(f"[red]Authentication failed: {e}[/red]")
+                    raise typer.Exit(1)
+        else:
+            try:
+                collector.authenticate_interactive()
+                rprint("[green]Google Drive authentication successful![/green]")
+            except ValueError as e:
+                rprint(f"[red]{e}[/red]")
+                rprint(
+                    "\n[yellow]To set up Google Drive integration:[/yellow]"
+                    "\n1. Go to Google Cloud Console"
+                    "\n2. Create a project and enable Drive API"
+                    "\n3. Create OAuth credentials (Desktop app type)"
+                    "\n4. Download the credentials JSON file"
+                    "\n5. Run: tax-agent drive auth --setup <path-to-credentials.json>"
+                )
+                raise typer.Exit(1)
+            except Exception as e:
+                rprint(f"[red]Authentication failed: {e}[/red]")
+                raise typer.Exit(1)
+
+
+@drive_app.command(name="list")
+def drive_list(
+    folder_id: Annotated[
+        Optional[str],
+        typer.Argument(help="Folder ID to list contents of (default: root)"),
+    ] = None,
+    files: Annotated[
+        bool, typer.Option("--files", "-f", help="Show files instead of folders")
+    ] = False,
+) -> None:
+    """List folders or files in Google Drive."""
+    from tax_agent.collectors.google_drive import GoogleDriveCollector
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    collector = GoogleDriveCollector()
+
+    if not collector.is_authenticated():
+        rprint(
+            "[red]Not authenticated with Google Drive. Run 'tax-agent drive auth' first.[/red]"
+        )
+        raise typer.Exit(1)
+
+    parent = folder_id or "root"
+    parent_name = "Root" if parent == "root" else parent
+
+    try:
+        if files:
+            # List files
+            with console.status(f"[bold green]Listing files in {parent_name}..."):
+                items = collector.list_files(parent)
+
+            if not items:
+                rprint(f"[yellow]No supported files found in folder.[/yellow]")
+                return
+
+            table = Table(title=f"Files in {parent_name}")
+            table.add_column("Name", style="cyan")
+            table.add_column("Type", style="white")
+            table.add_column("ID", style="dim")
+
+            for item in items:
+                file_type = "Google Doc" if item.is_google_doc else item.mime_type.split("/")[-1].upper()
+                table.add_row(item.name, file_type, item.id)
+
+            console.print(table)
+            rprint(f"\n[dim]Found {len(items)} supported file(s)[/dim]")
+        else:
+            # List folders
+            with console.status(f"[bold green]Listing folders in {parent_name}..."):
+                items = collector.list_folders(parent)
+
+            if not items:
+                rprint(f"[yellow]No folders found in {parent_name}.[/yellow]")
+                return
+
+            table = Table(title=f"Folders in {parent_name}")
+            table.add_column("Name", style="cyan")
+            table.add_column("ID", style="dim")
+
+            for item in items:
+                table.add_row(item.name, item.id)
+
+            console.print(table)
+            rprint(f"\n[dim]Found {len(items)} folder(s)[/dim]")
+            rprint(
+                "\n[cyan]To see files in a folder:[/cyan] tax-agent drive list <folder-id> --files"
+            )
+
+    except Exception as e:
+        rprint(f"[red]Error listing Drive contents: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@drive_app.command(name="collect")
+def drive_collect(
+    folder_id: Annotated[str, typer.Argument(help="Google Drive folder ID")],
+    year: Annotated[
+        Optional[int], typer.Option("--year", "-y", help="Tax year")
+    ] = None,
+    recursive: Annotated[
+        bool, typer.Option("--recursive", "-r", help="Include subfolders")
+    ] = False,
+) -> None:
+    """Collect and process tax documents from a Google Drive folder."""
+    from tax_agent.collectors.document_classifier import DocumentCollector
+    from tax_agent.collectors.google_drive import GoogleDriveCollector
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    drive_collector = GoogleDriveCollector()
+
+    if not drive_collector.is_authenticated():
+        rprint(
+            "[red]Not authenticated with Google Drive. Run 'tax-agent drive auth' first.[/red]"
+        )
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+
+    # Get folder info for display
+    folder_info = drive_collector.get_folder_info(folder_id)
+    folder_name = folder_info.name if folder_info else folder_id
+
+    rprint(f"[cyan]Processing documents from '{folder_name}' for tax year {tax_year}...[/cyan]")
+    if recursive:
+        rprint("[dim]Including subfolders[/dim]")
+
+    collector = DocumentCollector()
+
+    try:
+        with console.status("[bold green]Downloading and processing files..."):
+            results = collector.process_google_drive_folder(
+                folder_id, tax_year, recursive=recursive
+            )
+
+        if not results:
+            rprint("[yellow]No supported files found in folder.[/yellow]")
+            return
+
+        rprint(f"\n[bold]Processed {len(results)} file(s):[/bold]")
+
+        success_count = 0
+        for filename, result in results:
+            if isinstance(result, Exception):
+                rprint(f"[red]  {filename}: {result}[/red]")
+            else:
+                confidence = "high" if result.confidence_score >= 0.8 else "low"
+                review_flag = (
+                    " [yellow](needs review)[/yellow]" if result.needs_review else ""
+                )
+                rprint(
+                    f"[green]  {filename}: {result.document_type.value} from "
+                    f"{result.issuer_name} ({confidence} confidence){review_flag}[/green]"
+                )
+                success_count += 1
+
+        rprint(f"\n[cyan]Successfully processed {success_count}/{len(results)} files.[/cyan]")
+
+    except Exception as e:
+        rprint(f"[red]Error processing Drive folder: {e}[/red]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":
