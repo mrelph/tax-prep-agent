@@ -69,10 +69,27 @@ class DocumentCollector:
         # Extract structured data based on document type
         extracted_data = self._extract_data(doc_type, text_for_analysis)
 
+        # Verify extracted data against source document
+        from tax_agent.verification import verify_extraction
+        verification = verify_extraction(doc_type.value, extracted_data, raw_text)
+
         # Use tax year from classification if available
         classified_year = classification.get("tax_year")
         if classified_year and isinstance(classified_year, int):
             tax_year = classified_year
+
+        # Determine if review is needed based on classification AND verification
+        needs_review = (
+            classification.get("confidence", 0.0) < 0.8
+            or doc_type == DocumentType.UNKNOWN
+            or not verification.get("verified", True)
+            or verification.get("confidence", 1.0) < 0.7
+        )
+
+        # Combine confidence scores
+        classification_conf = classification.get("confidence", 0.0)
+        verification_conf = verification.get("confidence", 1.0)
+        combined_confidence = (classification_conf + verification_conf) / 2
 
         # Create the document
         document = TaxDocument(
@@ -86,8 +103,8 @@ class DocumentCollector:
             extracted_data=extracted_data,
             file_path=str(file_path.absolute()),
             file_hash=file_hash,
-            confidence_score=classification.get("confidence", 0.0),
-            needs_review=classification.get("confidence", 0.0) < 0.8 or doc_type == DocumentType.UNKNOWN,
+            confidence_score=combined_confidence,
+            needs_review=needs_review,
             created_at=datetime.now(),
             updated_at=datetime.now(),
         )

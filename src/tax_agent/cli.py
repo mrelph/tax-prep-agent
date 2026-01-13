@@ -22,8 +22,10 @@ console = Console()
 # Subcommands
 documents_app = typer.Typer(help="Manage collected tax documents")
 config_app = typer.Typer(help="Manage configuration")
+research_app = typer.Typer(help="Research current tax code and rules")
 app.add_typer(documents_app, name="documents")
 app.add_typer(config_app, name="config")
+app.add_typer(research_app, name="research")
 
 
 @app.command()
@@ -120,12 +122,48 @@ def init() -> None:
 
         rprint("\n[green]Tax agent initialized with Anthropic API![/green]")
 
+    # Ask for state
+    rprint("\n[bold]State Configuration[/bold]")
+    rprint("[dim]Your state affects tax calculations and optimization suggestions.[/dim]")
+
+    state_input = Prompt.ask(
+        "Enter your state code (e.g., CA, NY, TX) or 'skip' to set later",
+        default="skip"
+    )
+
+    if state_input.lower() != "skip" and len(state_input) == 2:
+        config.set("state", state_input.upper())
+        rprint(f"[green]State set to {state_input.upper()}[/green]")
+    else:
+        rprint("[dim]State not set. You can set it later with: tax-agent config set state XX[/dim]")
+
+    # Ask for tax year
+    from datetime import datetime
+    current_year = datetime.now().year
+    default_tax_year = current_year - 1 if datetime.now().month < 4 else current_year
+
+    tax_year_input = Prompt.ask(
+        f"Tax year you're preparing for",
+        default=str(default_tax_year)
+    )
+
+    try:
+        tax_year = int(tax_year_input)
+        config.set("tax_year", tax_year)
+        rprint(f"[green]Tax year set to {tax_year}[/green]")
+    except ValueError:
+        rprint(f"[yellow]Invalid year, defaulting to {default_tax_year}[/yellow]")
+        config.set("tax_year", default_tax_year)
+
+    rprint(f"\n[bold green]Setup Complete![/bold green]")
     rprint(f"Data directory: {config.data_dir}")
     rprint(f"AI Provider: {ai_provider}")
     rprint(f"Model: claude-sonnet-4-5-20250514")
+    rprint(f"Tax Year: {config.tax_year}")
+    rprint(f"State: {config.state or 'Not set'}")
     rprint("\nNext steps:")
-    rprint("  1. Set your state: [cyan]tax-agent config set state CA[/cyan]")
-    rprint("  2. Collect documents: [cyan]tax-agent collect <file>[/cyan]")
+    rprint("  1. Collect documents: [cyan]tax-agent collect <file>[/cyan]")
+    rprint("  2. Run optimization: [cyan]tax-agent optimize[/cyan]")
 
 
 @app.command()
@@ -164,6 +202,72 @@ def status() -> None:
 
     if not config.is_initialized:
         rprint("\n[yellow]Run 'tax-agent init' to get started.[/yellow]")
+
+
+@app.command()
+def chat(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Start an interactive chat session to explore tax strategies."""
+    from tax_agent.chat import TaxAdvisorChat
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    advisor = TaxAdvisorChat(tax_year)
+
+    rprint(Panel.fit(
+        f"[bold blue]Tax Advisor Chat[/bold blue]\n\n"
+        f"Tax Year: {tax_year}\n"
+        f"State: {config.state or 'Not set'}\n\n"
+        "Ask me anything about your taxes! I'll help you find deductions,\n"
+        "understand tax implications, and explore strategies to save money.\n\n"
+        "Type 'quit' or 'exit' to end the session.\n"
+        "Type 'suggest' for topic suggestions.",
+        title="Interactive Tax Advisor"
+    ))
+
+    # Show suggestions
+    suggestions = advisor.suggest_topics()
+    rprint("\n[dim]Try asking:[/dim]")
+    for s in suggestions[:3]:
+        rprint(f"  [cyan]• {s}[/cyan]")
+    rprint("")
+
+    while True:
+        try:
+            user_input = Prompt.ask("\n[bold green]You[/bold green]")
+        except KeyboardInterrupt:
+            rprint("\n[dim]Session ended.[/dim]")
+            break
+
+        if not user_input.strip():
+            continue
+
+        if user_input.lower() in ("quit", "exit", "bye", "q"):
+            rprint("[dim]Session ended. Good luck with your taxes![/dim]")
+            break
+
+        if user_input.lower() == "suggest":
+            suggestions = advisor.suggest_topics()
+            rprint("\n[bold]Suggested topics:[/bold]")
+            for s in suggestions:
+                rprint(f"  [cyan]• {s}[/cyan]")
+            continue
+
+        if user_input.lower() == "reset":
+            advisor.reset()
+            rprint("[dim]Conversation reset.[/dim]")
+            continue
+
+        with console.status("[bold green]Thinking..."):
+            response = advisor.chat(user_input)
+
+        rprint(f"\n[bold blue]Advisor[/bold blue]: {response}")
 
 
 @app.command()
@@ -788,6 +892,149 @@ def config_api_key() -> None:
 
     config.set_api_key(api_key)
     rprint("[green]API key updated successfully.[/green]")
+
+
+# Research subcommands
+@research_app.command("topic")
+def research_topic(
+    topic: Annotated[str, typer.Argument(help="Tax topic to research")],
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Research a specific tax topic with current IRS guidance."""
+    from tax_agent.research import TaxResearcher
+
+    config = get_config()
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    researcher = TaxResearcher(tax_year)
+
+    rprint(f"[cyan]Researching: {topic} (Tax Year {tax_year})...[/cyan]\n")
+
+    with console.status("[bold green]Searching for current tax guidance..."):
+        result = researcher.research_topic(topic)
+
+    rprint(Panel(result, title=f"Research: {topic}", border_style="blue"))
+
+
+@research_app.command("limits")
+def research_limits(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Verify current IRS contribution limits and thresholds."""
+    from tax_agent.research import TaxResearcher
+
+    config = get_config()
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    researcher = TaxResearcher(tax_year)
+
+    with console.status(f"[bold green]Verifying {tax_year} IRS limits..."):
+        result = researcher.research_current_limits()
+
+    if "error" in result:
+        rprint(f"[red]Error: {result['error']}[/red]")
+        return
+
+    rprint(Panel.fit(f"[bold]IRS Limits for Tax Year {tax_year}[/bold]", title="Verified Limits"))
+
+    limits = result.get("limits", {})
+    if limits:
+        table = Table(title="Contribution & Deduction Limits")
+        table.add_column("Item", style="cyan")
+        table.add_column("Amount", style="green", justify="right")
+        table.add_column("Source", style="dim")
+
+        for key, info in limits.items():
+            if isinstance(info, dict):
+                amount = info.get("amount", "N/A")
+                source = info.get("source", "")
+                amount_str = f"${amount:,}" if isinstance(amount, (int, float)) else str(amount)
+                table.add_row(key.replace("_", " ").title(), amount_str, source)
+
+        console.print(table)
+
+    changes = result.get("recent_changes", [])
+    if changes:
+        rprint("\n[bold yellow]Recent Changes:[/bold yellow]")
+        for change in changes:
+            rprint(f"  - {change}")
+
+
+@research_app.command("changes")
+def research_changes(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Check for recent tax law changes affecting this tax year."""
+    from tax_agent.research import TaxResearcher
+
+    config = get_config()
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    researcher = TaxResearcher(tax_year)
+
+    with console.status(f"[bold green]Checking for {tax_year} tax law changes..."):
+        result = researcher.check_for_law_changes()
+
+    rprint(Panel(result, title=f"Tax Law Changes for {tax_year}", border_style="yellow"))
+
+
+@research_app.command("state")
+def research_state(
+    state: Annotated[str, typer.Argument(help="State code (e.g., CA, NY, TX)")],
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Research state-specific tax rules."""
+    from tax_agent.research import TaxResearcher
+    import json
+
+    config = get_config()
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    researcher = TaxResearcher(tax_year)
+
+    with console.status(f"[bold green]Researching {state.upper()} tax rules..."):
+        result = researcher.verify_state_rules(state.upper())
+
+    if "error" in result:
+        rprint(f"[red]Error: {result['error']}[/red]")
+        return
+
+    rprint(Panel.fit(f"[bold]{state.upper()} Tax Rules - {tax_year}[/bold]", title="State Tax Info"))
+
+    if result.get("has_income_tax") is False:
+        rprint(f"[green]{state.upper()} has NO state income tax![/green]")
+    else:
+        table = Table(show_header=False, box=None)
+        table.add_column("Field", style="cyan", width=25)
+        table.add_column("Value", style="white")
+
+        table.add_row("Top Marginal Rate", f"{result.get('top_rate', 0)*100:.2f}%")
+        table.add_row("Capital Gains", result.get("capital_gains_treatment", "Unknown"))
+        table.add_row("Federal Conformity", result.get("federal_conformity", "Unknown"))
+
+        console.print(table)
+
+        if result.get("notable_credits"):
+            rprint("\n[bold]Notable Credits:[/bold]")
+            for credit in result["notable_credits"]:
+                rprint(f"  - {credit}")
+
+        if result.get("recent_changes"):
+            rprint("\n[bold yellow]Recent Changes:[/bold yellow]")
+            for change in result["recent_changes"]:
+                rprint(f"  - {change}")
 
 
 if __name__ == "__main__":
