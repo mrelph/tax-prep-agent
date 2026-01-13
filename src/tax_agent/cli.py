@@ -79,8 +79,8 @@ def init() -> None:
         ai_provider = AI_PROVIDER_AWS_BEDROCK
 
         rprint("\n[bold]AWS Bedrock Configuration[/bold]")
-        rprint("[dim]You can either enter credentials now, or leave blank to use")
-        rprint("environment variables / IAM role / AWS CLI profile.[/dim]\n")
+        rprint("[dim]You can either enter credentials now, or leave blank to use "
+               "environment variables / IAM role / AWS CLI profile.[/dim]\n")
 
         use_explicit_creds = Confirm.ask("Enter AWS credentials manually?", default=False)
 
