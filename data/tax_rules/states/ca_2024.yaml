@@ -1,0 +1,121 @@
+# California State Tax Rules for Tax Year 2024
+state: CA
+state_name: California
+tax_year: 2024
+
+# California uses 9 tax brackets
+brackets:
+  single:
+    - { min: 0, max: 10412, rate: 0.01 }
+    - { min: 10412, max: 24684, rate: 0.02 }
+    - { min: 24684, max: 38959, rate: 0.04 }
+    - { min: 38959, max: 54081, rate: 0.06 }
+    - { min: 54081, max: 68350, rate: 0.08 }
+    - { min: 68350, max: 349137, rate: 0.093 }
+    - { min: 349137, max: 418961, rate: 0.103 }
+    - { min: 418961, max: 698271, rate: 0.113 }
+    - { min: 698271, max: null, rate: 0.123 }
+
+  married_filing_jointly:
+    - { min: 0, max: 20824, rate: 0.01 }
+    - { min: 20824, max: 49368, rate: 0.02 }
+    - { min: 49368, max: 77918, rate: 0.04 }
+    - { min: 77918, max: 108162, rate: 0.06 }
+    - { min: 108162, max: 136700, rate: 0.08 }
+    - { min: 136700, max: 698274, rate: 0.093 }
+    - { min: 698274, max: 837922, rate: 0.103 }
+    - { min: 837922, max: 1396542, rate: 0.113 }
+    - { min: 1396542, max: null, rate: 0.123 }
+
+  head_of_household:
+    - { min: 0, max: 20839, rate: 0.01 }
+    - { min: 20839, max: 49371, rate: 0.02 }
+    - { min: 49371, max: 63644, rate: 0.04 }
+    - { min: 63644, max: 78765, rate: 0.06 }
+    - { min: 78765, max: 93037, rate: 0.08 }
+    - { min: 93037, max: 474824, rate: 0.093 }
+    - { min: 474824, max: 569790, rate: 0.103 }
+    - { min: 569790, max: 949649, rate: 0.113 }
+    - { min: 949649, max: null, rate: 0.123 }
+
+# Mental Health Services Tax (additional 1% on income over $1M)
+mental_health_tax:
+  threshold: 1000000
+  rate: 0.01
+
+# Standard deduction (California has limited standard deduction)
+standard_deduction:
+  single: 5363
+  married_filing_jointly: 10726
+  married_filing_separately: 5363
+  head_of_household: 10726
+
+# Personal exemption credits
+personal_exemption_credit:
+  single: 144
+  married_filing_jointly: 288
+  head_of_household: 144
+  dependent_credit: 446
+
+# California-specific deductions
+deductions:
+  # California doesn't allow SALT deduction (it's a state tax!)
+  salt_deduction: false
+
+  # Mortgage interest follows federal rules
+  mortgage_interest: true
+
+  # Charitable contributions follow federal rules
+  charitable: true
+
+  # Medical expenses (7.5% AGI floor, like federal)
+  medical_floor_percent: 7.5
+
+# California-specific credits
+credits:
+  # Renter's Credit (non-refundable)
+  renters_credit:
+    single: 60
+    married_filing_jointly: 120
+    head_of_household: 60
+    income_limit_single: 50746
+    income_limit_joint: 101492
+
+  # Child and Dependent Care Credit (percentage of federal credit)
+  child_care_credit:
+    percentage_of_federal: 0.50  # 50% of federal credit amount
+
+  # California Earned Income Tax Credit
+  ca_eitc:
+    max_earned_income: 30950
+    max_credit_no_children: 285
+    max_credit_one_child: 1900
+    max_credit_two_children: 3137
+    max_credit_three_plus: 3529
+
+  # Young Child Tax Credit (for children under 6)
+  young_child_tax_credit:
+    amount: 1117
+    income_limit: 30931
+
+# Special considerations
+special_rules:
+  # California taxes capital gains as ordinary income
+  capital_gains_treatment: ordinary_income
+
+  # California doesn't conform to federal QBI deduction
+  qbi_deduction_allowed: false
+
+  # RSU/Stock compensation
+  stock_compensation: "Taxed as ordinary income at vesting. CA taxes based on days worked in CA during vesting period for multi-state employees."
+
+  # Remote work
+  remote_work: "If working remotely for a CA employer while residing in CA, subject to CA tax. CA source income rules are complex for remote workers."
+
+# Common audit triggers
+audit_triggers:
+  - "High itemized deductions relative to income"
+  - "Home office deductions"
+  - "Unreported cryptocurrency gains"
+  - "Multi-state income allocation"
+  - "Pass-through entity deductions"
