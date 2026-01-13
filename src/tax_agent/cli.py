@@ -1,5 +1,6 @@
 """CLI commands for the tax prep agent."""
 
+import sys
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -11,6 +12,58 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from tax_agent.config import get_config
+
+
+def masked_input(prompt: str, mask_char: str = "*") -> str:
+    """
+    Get password input showing masked characters.
+
+    Args:
+        prompt: The prompt to display
+        mask_char: Character to show for each typed character
+
+    Returns:
+        The entered password
+    """
+    import termios
+    import tty
+
+    rprint(f"{prompt}: ", end="")
+    sys.stdout.flush()
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    password = []
+
+    try:
+        tty.setraw(fd)
+        while True:
+            char = sys.stdin.read(1)
+            if char in ('\r', '\n'):  # Enter pressed
+                break
+            elif char == '\x7f':  # Backspace
+                if password:
+                    password.pop()
+                    # Move cursor back, overwrite with space, move back again
+                    sys.stdout.write('\b \b')
+                    sys.stdout.flush()
+            elif char == '\x03':  # Ctrl+C
+                raise KeyboardInterrupt
+            elif char == '\x15':  # Ctrl+U - toggle visibility
+                # Clear current display
+                sys.stdout.write('\b' * len(password) + ' ' * len(password) + '\b' * len(password))
+                # Show actual password briefly
+                sys.stdout.write(''.join(password))
+                sys.stdout.flush()
+            elif ord(char) >= 32:  # Printable character
+                password.append(char)
+                sys.stdout.write(mask_char)
+                sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    print()  # Newline after password
+    return ''.join(password)
 
 app = typer.Typer(
     name="tax-agent",
@@ -55,14 +108,10 @@ def init() -> None:
     ))
 
     # Get encryption password
-    password = Prompt.ask(
-        "\n[bold]Enter a password for encrypting your tax data[/bold]",
-        password=True
-    )
-    password_confirm = Prompt.ask(
-        "[bold]Confirm password[/bold]",
-        password=True
-    )
+    rprint("\n[bold]Enter a password for encrypting your tax data[/bold]")
+    rprint("[dim](Ctrl+U to briefly show password)[/dim]")
+    password = masked_input("Password")
+    password_confirm = masked_input("Confirm password")
 
     if password != password_confirm:
         rprint("[red]Passwords do not match. Please try again.[/red]")
@@ -86,7 +135,8 @@ def init() -> None:
 
         if use_explicit_creds:
             aws_access_key = Prompt.ask("AWS Access Key ID")
-            aws_secret_key = Prompt.ask("AWS Secret Access Key", password=True)
+            rprint("[dim](Ctrl+U to briefly show key)[/dim]")
+            aws_secret_key = masked_input("AWS Secret Access Key")
         else:
             aws_access_key = None
             aws_secret_key = None
@@ -94,37 +144,36 @@ def init() -> None:
 
         aws_region = Prompt.ask("AWS Region", default="us-east-1")
 
-        # Initialize
-        with console.status("[bold green]Initializing..."):
-            config.initialize(password)
-            config.set("ai_provider", ai_provider)
-            config.set("aws_region", aws_region)
-            if aws_access_key and aws_secret_key:
-                config.set_aws_credentials(aws_access_key, aws_secret_key)
+        # Initialize (no spinner - keyring may prompt for password)
+        rprint("[cyan]Initializing...[/cyan]")
+        config.initialize(password)
+        config.set("ai_provider", ai_provider)
+        config.set("aws_region", aws_region)
+        if aws_access_key and aws_secret_key:
+            config.set_aws_credentials(aws_access_key, aws_secret_key)
 
-        rprint("\n[green]Tax agent initialized with AWS Bedrock![/green]")
+        rprint("[green]Tax agent initialized with AWS Bedrock![/green]")
 
     else:
         # Anthropic API setup
         ai_provider = AI_PROVIDER_ANTHROPIC
 
-        api_key = Prompt.ask(
-            "\n[bold]Enter your Anthropic API key[/bold]",
-            password=True
-        )
+        rprint("\n[bold]Enter your Anthropic API key[/bold]")
+        rprint("[dim](Ctrl+U to briefly show key)[/dim]")
+        api_key = masked_input("API Key")
 
         if not api_key.startswith("sk-"):
             rprint("[yellow]Warning: API key doesn't look like a valid Anthropic key[/yellow]")
             if not Confirm.ask("Continue anyway?"):
                 raise typer.Exit(1)
 
-        # Initialize
-        with console.status("[bold green]Initializing..."):
-            config.initialize(password)
-            config.set("ai_provider", ai_provider)
-            config.set_api_key(api_key)
+        # Initialize (no spinner - keyring may prompt for password)
+        rprint("[cyan]Initializing...[/cyan]")
+        config.initialize(password)
+        config.set("ai_provider", ai_provider)
+        config.set_api_key(api_key)
 
-        rprint("\n[green]Tax agent initialized with Anthropic API![/green]")
+        rprint("[green]Tax agent initialized with Anthropic API![/green]")
 
     # Ask for state
     rprint("\n[bold]State Configuration[/bold]")
