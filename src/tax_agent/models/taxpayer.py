@@ -90,5 +90,44 @@ class TaxpayerProfile(BaseModel):
         """Count of dependents."""
         return len(self.dependents)
 
+    def to_string(self) -> str:
+        """Convert profile to a readable string for AI context."""
+        lines = [
+            f"Tax Year: {self.tax_year}",
+            f"Filing Status: {self.filing_status}",
+            f"State: {self.state}",
+        ]
+
+        if self.city:
+            lines.append(f"City: {self.city}")
+
+        if self.is_65_or_older:
+            lines.append("Age: 65 or older")
+
+        if self.is_blind:
+            lines.append("Legally blind: Yes")
+
+        if self.dependents:
+            lines.append(f"Dependents: {len(self.dependents)}")
+            for dep in self.dependents:
+                lines.append(f"  - {dep.name} ({dep.relationship})")
+
+        if self.is_self_employed:
+            lines.append("Self-employed: Yes")
+
+        if self.has_hsa:
+            lines.append("Has HSA: Yes")
+
+        if self.has_foreign_accounts:
+            lines.append("Has foreign accounts: Yes (FBAR required)")
+
+        if self.is_covered_by_employer_retirement:
+            lines.append("Covered by employer retirement plan: Yes")
+
+        if self.is_part_year_resident:
+            lines.append(f"Part-year resident: {self.previous_state} -> {self.state}")
+
+        return "\n".join(lines)
+
     class Config:
         use_enum_values = True
