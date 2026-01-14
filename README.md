@@ -1,6 +1,40 @@
 # Tax Prep Agent
 
-A CLI-powered tax document collection, analysis, and optimization tool that uses AI (Claude) to help you manage tax documents, identify deductions, and review tax returns. Built for individuals dealing with complex tax situations including stock compensation (RSUs, ISOs, ESPP), multiple income sources, and state-specific considerations.
+An AI-powered tax assistant built on Anthropic's Claude Agent SDK. Provides interactive conversational access to tax document analysis, deduction discovery, and return review through an intelligent agentic interface with specialized subagents for complex tax domains.
+
+Built for individuals dealing with complex tax situations including stock compensation (RSUs, ISOs, ESPP), multiple income sources, and state-specific considerations.
+
+## Architecture Highlights
+
+### Agent SDK-First Design
+
+Built on Anthropic's Claude Agent SDK for agentic capabilities:
+
+**Agentic Loops**
+- Multi-turn reasoning for complex tax analysis
+- Tool use for document verification and research
+- Self-correcting analysis with cross-validation
+
+**Specialized Subagents**
+- Stock Compensation Analyst (RSUs, ISOs, NSOs, ESPP)
+- Deduction Finder (aggressive optimization)
+- Compliance Auditor (error detection, audit risk)
+- Investment Tax Analyst (capital gains, wash sales)
+- Retirement Tax Planner (401k, IRA, Roth strategies)
+- Self-Employment Specialist (Schedule C, SE tax)
+
+**Safety & Audit**
+- Comprehensive audit logging for all operations
+- SSN/EIN redaction from tool outputs
+- File access controls to tax-relevant directories
+- Rate limiting to prevent runaway API usage
+
+### Slash Command System
+
+Tab-completable slash commands provide structured access to all features:
+- Integrated with Agent SDK for intelligent routing
+- Context-aware command execution
+- Subcommand support for complex operations
 
 ## Features
 
@@ -98,24 +132,47 @@ tax-agent --version
 
 ## Quick Start
 
-### 1. Initialize and Start
+### Interactive Mode (Default)
+
+The tax agent runs in an interactive conversational mode powered by the Claude Agent SDK:
 
 ```bash
 # First-time setup
 tax-agent init
 
-# Then just run:
+# Start interactive mode
+tax-agent
+
+# Or run directly without init for first time
 tax-agent
 ```
 
-This starts interactive mode where you can:
-- Ask questions about your taxes
-- Use `/help` to see all commands
-- Use `/collect <file>` to add documents
-- Use `/analyze` to analyze your situation
-- Tab-complete slash commands
+**Interactive features:**
+- Natural language conversations about your tax situation
+- Slash commands for structured operations (`/help`, `/analyze`, `/collect`)
+- Tab completion for commands
+- Specialized subagents for complex domains (stock compensation, deductions, compliance)
+- Real-time document analysis with tool use
+- Audit trails and safety hooks
 
-### 2. Or Use Direct Commands
+**Example session:**
+```
+Welcome to Tax Prep Agent (Agent SDK Mode)
+
+You: /collect ~/Downloads/w2.pdf
+Agent: [Processing document with classification subagent...]
+       Collected W-2 from Google LLC for 2024
+
+You: How will my RSUs affect my taxes?
+Agent: [Invoking stock-compensation-analyst subagent...]
+       Let me analyze your equity compensation...
+       [Provides detailed RSU tax analysis]
+
+You: /analyze
+Agent: [Running comprehensive tax analysis with verification...]
+```
+
+### Direct CLI Commands
 
 ```bash
 # Collect documents
@@ -134,20 +191,30 @@ tax-agent ai review-return ~/taxes/1040.pdf
 
 ### Interactive Mode Commands
 
-When running `tax-agent` (interactive mode), these slash commands are available:
+When running `tax-agent` in interactive mode, you have two interaction styles:
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show all commands |
-| `/status` | View current status |
-| `/documents` | List collected documents |
-| `/collect <file>` | Add a document |
-| `/analyze` | Run tax analysis |
-| `/optimize` | Find deductions |
-| `/subagents` | List AI specialists |
-| `/config` | View/change settings |
+**Natural Language (Agent SDK)**
+Just ask questions in plain English:
+- "What deductions am I missing?"
+- "How do I minimize taxes on my stock compensation?"
+- "Is my return correct?"
 
-Or just type a question like "What deductions am I missing?"
+**Slash Commands (Structured Operations)**
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/help` | Show all commands | `/help` |
+| `/status` | View current status | `/status` |
+| `/documents` | List collected documents | `/documents list` |
+| `/collect <file>` | Add a document | `/collect ~/Downloads/w2.pdf` |
+| `/analyze` | Run tax analysis | `/analyze` |
+| `/optimize` | Find deductions | `/optimize` |
+| `/subagent <name>` | Use specialist AI | `/subagent deduction-finder` |
+| `/subagents` | List AI specialists | `/subagents` |
+| `/review <file>` | Review tax return | `/review ~/return.pdf` |
+| `/config` | View/change settings | `/config get state` |
+
+The agent intelligently routes complex tasks to specialized subagents for deeper expertise.
 
 ## CLI Command Reference
 
@@ -789,7 +856,12 @@ tax-prep-agent/
 ├── src/tax_agent/
 │   ├── __init__.py
 │   ├── cli.py              # CLI commands and interface
-│   ├── agent.py            # Claude API integration
+│   ├── agent_sdk.py        # Agent SDK integration (primary)
+│   ├── agent.py            # Legacy direct API integration
+│   ├── agent_compat.py     # Compatibility layer
+│   ├── slash_commands.py   # Slash command registry and handlers
+│   ├── subagents.py        # Specialized tax domain subagents
+│   ├── hooks.py            # Safety, audit, and control hooks
 │   ├── config.py           # Configuration management
 │   ├── analyzers/
 │   │   ├── deductions.py   # Deduction finder and optimizer

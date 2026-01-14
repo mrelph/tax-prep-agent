@@ -15,26 +15,54 @@ Technical architecture and design documentation for the Tax Prep Agent.
 
 ## System Overview
 
-The Tax Prep Agent is a Python-based CLI application that combines local document processing with cloud AI capabilities to provide intelligent tax document management and analysis.
+The Tax Prep Agent is a Python-based application built on Anthropic's Claude Agent SDK, combining local document processing with agentic AI capabilities to provide intelligent, conversational tax document management and analysis.
+
+### Primary Interface: Agent SDK
+
+The system operates in two modes:
+
+1. **Interactive Agent Mode** (Default): Conversational interface powered by the Claude Agent SDK
+   - Natural language interaction
+   - Agentic loops with multi-turn reasoning
+   - Tool use for verification and research
+   - Specialized subagents for complex domains
+   - Safety hooks for audit and control
+
+2. **Direct CLI Mode**: Traditional command-line interface
+   - Direct command execution (`tax-agent analyze`, `tax-agent collect`)
+   - Backward compatible with legacy workflows
+   - Uses compatibility layer to support both Agent SDK and direct API calls
 
 ### High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         User CLI                            │
-│                    (Typer + Rich UI)                        │
+│                    User Interface                           │
+│   Interactive Mode (Agent SDK) | Direct CLI (Typer)         │
 └─────────────────────────────────────────────────────────────┘
                               │
+                 ┌────────────┴────────────┐
+                 ▼                         ▼
+┌────────────────────────┐    ┌────────────────────────┐
+│   Agent SDK Layer      │    │   Direct CLI Layer     │
+│                        │    │                        │
+│ • TaxAgentSDK          │    │ • Command handlers     │
+│ • Slash commands       │    │ • Typer commands       │
+│ • Subagent router      │    │                        │
+│ • Safety hooks         │    │                        │
+└────────────────────────┘    └────────────────────────┘
+                 │                         │
+                 └────────────┬────────────┘
                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Command Handlers                         │
-│  (collect, analyze, optimize, review, chat, research)       │
-└─────────────────────────────────────────────────────────────┘
+                    ┌──────────────────┐
+                    │  Agent Compat    │
+                    │  (Unified API)   │
+                    └──────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
 ┌──────────────┐    ┌──────────────────┐    ┌──────────────┐
-│  Collectors  │    │    Analyzers     │    │   Reviewers  │
+│  Collectors  │    │   Analyzers      │    │  Reviewers   │
 │              │    │                  │    │              │
 │ • OCR        │    │ • Implications   │    │ • Error      │
 │ • PDF Parser │    │ • Deductions     │    │   Checker    │
@@ -44,12 +72,22 @@ The Tax Prep Agent is a Python-based CLI application that combines local documen
         │                     │                     │
         └─────────────────────┼─────────────────────┘
                               ▼
-                    ┌──────────────────┐
-                    │   TaxAgent (AI)  │
-                    │                  │
-                    │ • Anthropic API  │
-                    │ • AWS Bedrock    │
-                    └──────────────────┘
+                    ┌──────────────────────────┐
+                    │   AI Engine Layer        │
+                    │                          │
+                    │ ┌──────────────────────┐ │
+                    │ │ Agent SDK (Primary)  │ │
+                    │ │ • Agentic loops      │ │
+                    │ │ • Tool use           │ │
+                    │ │ • Subagents          │ │
+                    │ │ • Hooks              │ │
+                    │ └──────────────────────┘ │
+                    │ ┌──────────────────────┐ │
+                    │ │ Legacy Direct API    │ │
+                    │ │ • Anthropic SDK      │ │
+                    │ │ • AWS Bedrock        │ │
+                    │ └──────────────────────┘ │
+                    └──────────────────────────┘
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
@@ -97,16 +135,18 @@ The Tax Prep Agent is a Python-based CLI application that combines local documen
 
 **Key Classes/Functions:**
 - `app`: Main Typer application
+- `_start_interactive_mode()`: Launch Agent SDK interactive session
 - Command handlers: `init()`, `collect()`, `analyze()`, `optimize()`, `review()`, `chat()`
 - Sub-applications: `documents_app`, `config_app`, `research_app`, `drive_app`
 
 **Interactions:**
 - Parses user commands and arguments
+- Routes to interactive mode (default) or direct CLI
 - Validates inputs
 - Orchestrates calls to business logic layers
 - Formats and displays results using Rich
 
-**Example Flow:**
+**Example Flow (Direct CLI):**
 ```python
 @app.command()
 def collect(file: Path, year: int | None = None):
@@ -114,6 +154,212 @@ def collect(file: Path, year: int | None = None):
     # 2. Initialize DocumentCollector
     # 3. Process file
     # 4. Display results
+```
+
+**Example Flow (Interactive):**
+```python
+def _start_interactive_mode():
+    # 1. Initialize Agent SDK
+    # 2. Display welcome message
+    # 3. Start REPL loop
+    # 4. Parse slash commands or natural language
+    # 5. Route to appropriate handler
+    # 6. Display results with streaming
+```
+
+---
+
+### 1a. Agent SDK Layer (`agent_sdk.py`)
+
+**Responsibility:** Claude Agent SDK integration for agentic capabilities
+
+**Key Class:** `TaxAgentSDK`
+
+**Methods:**
+- `classify_document_async()`: Agentic document classification with verification
+- `analyze_documents_async()`: Multi-turn analysis with tool use
+- `review_return_async()`: Comprehensive return review with cross-referencing
+- `interactive_query_async()`: Conversational tax advice
+- `invoke_subagent_async()`: Delegate to specialized subagents
+
+**Agentic Features:**
+- Multi-turn reasoning loops (configurable `max_turns`)
+- Tool use (`Read`, `Grep`, `Glob`, `WebSearch`, `WebFetch`)
+- Streaming responses
+- Hook integration for safety and audit
+- Subagent delegation
+
+**Configuration:**
+```python
+sdk_agent = TaxAgentSDK(
+    model="claude-sonnet-4-5",
+    max_turns=10,
+    use_hooks=True  # Enable safety hooks
+)
+```
+
+---
+
+### 1b. Slash Command System (`slash_commands.py`)
+
+**Responsibility:** Command registry and handlers for interactive mode
+
+**Key Functions:**
+- `register_command()`: Register slash commands
+- `get_command()`: Retrieve command by name
+- `get_completions()`: Tab completion support
+- `parse_slash_command()`: Parse user input
+- `execute_slash_command()`: Execute and return result
+
+**Registered Commands:**
+- `/help` - Show available commands
+- `/status` - Display agent status
+- `/documents` - Manage collected documents
+- `/collect <file>` - Add document
+- `/analyze` - Run tax analysis
+- `/optimize` - Find deductions
+- `/subagent <name>` - Invoke specialist
+- `/subagents` - List specialists
+- `/review <file>` - Review return
+- `/config` - Manage settings
+
+**Command Structure:**
+```python
+@dataclass
+class SlashCommand:
+    name: str
+    description: str
+    handler: Callable[..., str]
+    aliases: list[str]
+    subcommands: dict[str, SlashCommand]
+    requires_init: bool
+    usage: str
+```
+
+---
+
+### 1c. Subagent System (`subagents.py`)
+
+**Responsibility:** Specialized tax domain experts
+
+**Key Class:** `SubagentDefinition`
+
+**Available Subagents:**
+
+1. **Stock Compensation Analyst** (`stock-compensation-analyst`)
+   - RSU, ISO, NSO, ESPP taxation
+   - Wash sale detection
+   - AMT analysis
+   - Cost basis verification
+
+2. **Deduction Finder** (`deduction-finder`)
+   - Aggressive deduction discovery
+   - Standard vs itemized comparison
+   - Credit hunting
+   - Bunching strategies
+
+3. **Compliance Auditor** (`compliance-auditor`)
+   - Error detection
+   - Income verification
+   - Audit risk assessment
+   - Mathematical checks
+
+4. **Investment Tax Analyst** (`investment-tax-analyst`)
+   - Capital gains optimization
+   - Dividend classification
+   - NIIT calculation
+   - Tax-loss harvesting
+
+5. **Retirement Tax Planner** (`retirement-tax-planner`)
+   - 401(k), IRA, Roth optimization
+   - RMD planning
+   - Backdoor Roth strategies
+   - Contribution maximization
+
+6. **Self-Employment Specialist** (`self-employment-specialist`)
+   - Schedule C analysis
+   - SE tax calculation
+   - Home office deduction
+   - QBI deduction optimization
+
+**Subagent Configuration:**
+```python
+@dataclass
+class SubagentDefinition:
+    name: str
+    description: str
+    system_prompt: str
+    allowed_tools: list[str]
+    max_turns: int
+    model: str | None
+```
+
+**Usage:**
+```python
+# Get subagent for task
+subagent = get_subagent_for_task("analyze RSU taxation")
+# Returns: STOCK_COMPENSATION_ANALYST
+
+# Invoke subagent
+result = sdk_agent.invoke_subagent(
+    "stock-compensation-analyst",
+    "Analyze RSU vesting and sale tax implications",
+    source_dir=Path("~/taxes")
+)
+```
+
+---
+
+### 1d. Safety Hooks (`hooks.py`)
+
+**Responsibility:** Safety, audit, and control mechanisms
+
+**Hook Types:**
+
+**PreToolUse Hooks:**
+- `audit_log_hook`: Log all tool invocations
+- `sensitive_data_guard`: Restrict file access to tax directories
+- `web_access_guard`: Control web tool usage
+
+**PostToolUse Hooks:**
+- `audit_log_hook`: Log tool completions
+- `ssn_redaction_hook`: Redact SSN from outputs
+- `ein_redaction_hook`: Redact EIN from outputs
+- `rate_limit_hook`: Track tool usage for rate limiting
+
+**Hook Configuration:**
+```python
+def get_tax_hooks() -> dict:
+    return {
+        "PreToolUse": [
+            audit_log_hook,
+            sensitive_data_guard,
+            web_access_guard,
+        ],
+        "PostToolUse": [
+            audit_log_hook,
+            ssn_redaction_hook,
+            ein_redaction_hook,
+            rate_limit_hook,
+        ],
+    }
+```
+
+**File Access Control:**
+```python
+# Allowed directories
+allowed_prefixes = [
+    "/tmp/",
+    "~/.tax-agent/data/",
+    "~/.tax-agent/config/",
+]
+
+# Blocks access to other files
+if not is_allowed:
+    return {
+        "permissionDecision": "deny",
+        "permissionDecisionReason": "File access restricted"
+    }
 ```
 
 ### 2. Document Collectors (`collectors/`)
@@ -775,6 +1021,177 @@ class TaxpayerProfile(BaseModel):
    ├─> Overall assessment
    ├─> Findings table (severity, category, impact)
    └─> Detailed findings with recommendations
+```
+
+---
+
+## Agent SDK Data Flows
+
+### Interactive Mode Flow
+
+```
+1. User Starts Interactive Mode
+   └─> tax-agent (no arguments)
+
+2. CLI (cli.py::_start_interactive_mode)
+   ├─> Check if SDK available
+   ├─> Initialize TaxAgentSDK
+   ├─> Load slash command registry
+   ├─> Display welcome message
+   └─> Start REPL loop
+
+3. User Input Loop
+   ├─> Read user input (with tab completion)
+   └─> Classify input type
+
+4. Route Input
+   ├─> If starts with '/':
+   │   ├─> parse_slash_command()
+   │   ├─> execute_slash_command()
+   │   └─> Display result
+   │
+   └─> Else (natural language):
+       ├─> Prepare context (documents, profile)
+       └─> TaxAgentSDK.interactive_query_async()
+
+5. Agent SDK Processing (Natural Language)
+   ├─> claude_code_sdk.query()
+   ├─> Apply system prompt
+   ├─> Enable tools (Read, Grep, WebSearch, etc.)
+   ├─> Apply safety hooks
+   └─> Stream response chunks
+
+6. Agentic Loop (if needed)
+   ├─> Agent decides to use tool
+   ├─> PreToolUse hooks run
+   │   ├─> audit_log_hook: Log invocation
+   │   ├─> sensitive_data_guard: Check permissions
+   │   └─> web_access_guard: Validate web access
+   │
+   ├─> Tool executes (e.g., Read file)
+   │
+   ├─> PostToolUse hooks run
+   │   ├─> audit_log_hook: Log completion
+   │   ├─> ssn_redaction_hook: Redact sensitive data
+   │   └─> rate_limit_hook: Track usage
+   │
+   ├─> Agent receives (redacted) tool output
+   ├─> Agent continues reasoning
+   └─> Loop until max_turns or task complete
+
+7. Display Response
+   └─> Stream output to console with Rich formatting
+```
+
+### Subagent Invocation Flow
+
+```
+1. User Invokes Subagent
+   └─> /subagent deduction-finder Find all missed deductions
+
+2. Slash Command Handler
+   ├─> parse_slash_command("subagent", ["deduction-finder", "..."])
+   └─> cmd_subagent()
+
+3. Subagent Lookup
+   ├─> get_subagent("deduction-finder")
+   └─> Returns SubagentDefinition
+
+4. TaxAgentSDK.invoke_subagent_async()
+   ├─> Load subagent configuration
+   │   ├─> system_prompt (deduction-specific)
+   │   ├─> allowed_tools (Read, Grep, WebSearch, calculate_tax)
+   │   ├─> max_turns (10)
+   │   └─> model (default or subagent-specific)
+   │
+   └─> claude_code_sdk.query() with subagent options
+
+5. Subagent Processing
+   ├─> Reads source documents to verify income
+   ├─> Searches for deduction patterns
+   ├─> Looks up current limits via WebSearch
+   ├─> Calculates tax impact
+   └─> Returns comprehensive recommendations
+
+6. Stream Results
+   └─> Display with deduction categories, amounts, actions
+```
+
+### Document Classification with Agent SDK
+
+```
+1. DocumentCollector.process_file()
+   ├─> Extract text (OCR or PDF)
+   └─> TaxAgentSDK.classify_document_async(text, file_path)
+
+2. Agent SDK Classification
+   ├─> Apply TAX_DOCUMENT_CLASSIFIER_PROMPT
+   ├─> Enable tools: Read, Grep (for verification)
+   ├─> max_turns: 3 (limited for performance)
+   └─> Start agentic loop
+
+3. Agentic Classification Loop
+   ├─> Agent analyzes text
+   ├─> If uncertain:
+   │   ├─> Uses Grep to search for specific markers
+   │   │   (e.g., "Form W-2", "Box 1", "Wages")
+   │   └─> Verifies key fields match document type
+   │
+   ├─> Returns JSON classification:
+   │   {
+   │     "document_type": "W2",
+   │     "document_category": "SOURCE",
+   │     "confidence": 0.95,
+   │     "issuer_name": "Google LLC",
+   │     "tax_year": 2024,
+   │     "reasoning": "Verified W-2 via Box labels"
+   │   }
+   │
+   └─> Hooks ensure sensitive data redacted
+
+4. Verification & Storage
+   ├─> OutputVerifier.verify_extracted_data()
+   ├─> Database.save_document()
+   └─> Return result to user
+```
+
+### Analysis with Tool Use
+
+```
+1. User: /analyze
+
+2. Slash Command Handler
+   └─> cmd_analyze()
+
+3. Load Context
+   ├─> Database.get_documents() → documents_summary
+   └─> get_profile() → taxpayer_info
+
+4. TaxAgentSDK.analyze_documents_async()
+   ├─> Apply TAX_ANALYSIS_PROMPT
+   ├─> Enable tools: Read, Grep, Glob, WebSearch, WebFetch
+   ├─> Set source_dir for file access
+   ├─> max_turns: 10 (configurable)
+   └─> Start analysis
+
+5. Agentic Analysis
+   ├─> Agent reads documents summary
+   ├─> Decides to verify W-2 Box 1 amount
+   │   ├─> Uses Read to access source document
+   │   ├─> Extracts and verifies amount
+   │   └─> Confirms accuracy
+   │
+   ├─> Decides to check current HSA limits
+   │   ├─> Uses WebSearch for "HSA contribution limit 2024"
+   │   ├─> Parses IRS guidance
+   │   └─> Applies to taxpayer situation
+   │
+   ├─> Performs tax calculations
+   ├─> Identifies optimization opportunities
+   └─> Streams comprehensive analysis
+
+6. Display Results
+   └─> Real-time streaming output with Rich formatting
 ```
 
 ## AI Integration

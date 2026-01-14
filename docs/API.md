@@ -26,11 +26,27 @@ Main package containing all tax preparation functionality.
 from tax_agent import get_agent, get_config, get_database
 ```
 
-## Agent Module
+## Agent Modules
 
-### `tax_agent.agent`
+### `tax_agent.agent_sdk` (Primary)
 
-AI agent for tax document processing and analysis using Claude.
+Agent SDK-powered tax agent with agentic capabilities, tool use, and specialized subagents.
+
+### `tax_agent.agent` (Legacy)
+
+Direct Anthropic API integration for backward compatibility.
+
+### `tax_agent.agent_compat`
+
+Compatibility layer that automatically routes to Agent SDK or legacy API based on availability and configuration.
+
+---
+
+## Agent SDK Module
+
+### `tax_agent.agent_sdk`
+
+Claude Agent SDK integration providing agentic loops, tool use, and specialized subagents.
 
 #### `TaxAgent`
 
