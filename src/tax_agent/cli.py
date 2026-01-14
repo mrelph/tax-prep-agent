@@ -403,27 +403,30 @@ def _start_interactive_mode() -> None:
     # Set up prompt with autocomplete
     try:
         from prompt_toolkit import prompt as pt_prompt
-        from prompt_toolkit.completion import WordCompleter, CompleteStyle
-        from prompt_toolkit.styles import Style
+        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+        from prompt_toolkit.history import InMemoryHistory
 
         # Create completer with slash commands
+        commands = get_all_command_names()
         command_completer = WordCompleter(
-            get_all_command_names(),
+            commands,
             ignore_case=True,
             match_middle=False,
         )
 
-        style = Style.from_dict({
-            'prompt': 'ansigreen bold',
-        })
+        # Create history with all commands pre-populated for auto-suggest
+        history = InMemoryHistory()
+        for cmd in commands:
+            history.append_string(cmd)
 
         def get_input():
             return pt_prompt(
                 "> ",
                 completer=command_completer,
-                style=style,
-                complete_while_typing=True,  # Show completions as you type
-                complete_style=CompleteStyle.MULTI_COLUMN,  # Horizontal list, not dropdown
+                history=history,
+                auto_suggest=AutoSuggestFromHistory(),  # Shows ghost text inline
+                complete_while_typing=False,  # Tab to complete
             )
 
         has_autocomplete = True
@@ -435,7 +438,7 @@ def _start_interactive_mode() -> None:
             return Prompt.ask("\n[bold green]>[/bold green]")
 
     if has_autocomplete:
-        rprint("[dim]Tip: Type / for command suggestions[/dim]\n")
+        rprint("[dim]Tip: Type / then Tab to complete, or right-arrow to accept suggestion[/dim]\n")
 
     # Main interaction loop
     while True:

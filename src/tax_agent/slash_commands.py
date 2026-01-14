@@ -541,9 +541,61 @@ def cmd_review(args: list[str], context: dict) -> str:
     file_path = Path(args[0]).expanduser()
 
     if not file_path.exists():
-        return f"File not found: {file_path}"
+        return f"✗ File not found: {file_path}"
 
-    return f"[Reviewing tax return: {file_path}...]"
+    # Parse --year option
+    from tax_agent.config import get_config
+    config = get_config()
+    year = config.tax_year
+
+    if "--year" in args:
+        idx = args.index("--year")
+        if idx + 1 < len(args):
+            try:
+                year = int(args[idx + 1])
+            except ValueError:
+                return f"✗ Invalid year: {args[idx + 1]}"
+
+    try:
+        from tax_agent.reviewers.error_checker import ReturnReviewer
+
+        reviewer = ReturnReviewer(year)
+        review_result = reviewer.review_return(file_path)
+
+        # Build response
+        lines = [f"# ✓ Tax Return Review Complete\n"]
+        lines.append(f"**Tax Year:** {review_result.return_summary.tax_year}")
+        lines.append(f"**Documents Checked:** {len(review_result.source_documents_checked)}")
+        lines.append(f"**Findings:** {len(review_result.findings)}\n")
+
+        if review_result.findings:
+            # Group by severity
+            errors = [f for f in review_result.findings if f.severity.value == "error"]
+            warnings = [f for f in review_result.findings if f.severity.value == "warning"]
+            suggestions = [f for f in review_result.findings if f.severity.value == "suggestion"]
+
+            if errors:
+                lines.append("## Errors (must fix)\n")
+                for f in errors:
+                    impact = f" (${f.estimated_impact:,.0f})" if f.estimated_impact else ""
+                    lines.append(f"- **{f.field}**: {f.description}{impact}")
+
+            if warnings:
+                lines.append("\n## Warnings (should verify)\n")
+                for f in warnings:
+                    lines.append(f"- **{f.field}**: {f.description}")
+
+            if suggestions:
+                lines.append("\n## Suggestions\n")
+                for f in suggestions[:5]:  # Limit to 5
+                    lines.append(f"- {f.description}")
+        else:
+            lines.append("**No issues found!** Your return looks good.")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"✗ Error reviewing return: {e}"
 
 
 def cmd_config(args: list[str], context: dict) -> str:
