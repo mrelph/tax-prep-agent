@@ -53,6 +53,9 @@ class ReturnReviewer:
         # Build source document summary
         source_summary = self._build_source_summary(source_docs)
 
+        # Get user memories for personalized review
+        taxpayer_context = self._get_taxpayer_context()
+
         # Create initial review object
         review = TaxReturnReview(
             id=str(uuid.uuid4()),
@@ -68,8 +71,8 @@ class ReturnReviewer:
         for finding in rule_findings:
             review.add_finding(finding)
 
-        # Run AI-powered review
-        ai_findings_text = self.agent.review_tax_return(return_text, source_summary)
+        # Run AI-powered review with taxpayer context
+        ai_findings_text = self._run_ai_review(return_text, source_summary, taxpayer_context)
         ai_findings = self._parse_ai_findings(ai_findings_text)
         for finding in ai_findings:
             review.add_finding(finding)
@@ -130,6 +133,100 @@ class ReturnReviewer:
             lines.append(line)
 
         return "\n".join(lines)
+
+    def _get_taxpayer_context(self) -> str:
+        """Get taxpayer context from memories and profile."""
+        context_parts = []
+
+        # Get memories
+        try:
+            from tax_agent.memory import MemoryManager
+            memory_mgr = MemoryManager(self.db)
+            memories = memory_mgr.get_all_memories()
+            if memories:
+                memory_context = memory_mgr.format_memories_for_context(memories)
+                if memory_context:
+                    context_parts.append("Known information about taxpayer:")
+                    context_parts.append(memory_context)
+        except Exception:
+            pass
+
+        # Get taxpayer profile if available
+        try:
+            profile = self.db.get_taxpayer_profile(self.tax_year)
+            if profile:
+                context_parts.append(f"\nFiling Status: {profile.filing_status}")
+                context_parts.append(f"State: {profile.state}")
+                if profile.is_self_employed:
+                    context_parts.append("Self-employed: Yes")
+                if profile.dependents:
+                    context_parts.append(f"Dependents: {len(profile.dependents)}")
+        except Exception:
+            pass
+
+        return "\n".join(context_parts) if context_parts else ""
+
+    def _run_ai_review(
+        self,
+        return_text: str,
+        source_summary: str,
+        taxpayer_context: str,
+    ) -> str:
+        """Run comprehensive AI review with taxpayer context."""
+        # Build enhanced prompt with taxpayer context
+        enhanced_source = source_summary
+        if taxpayer_context:
+            enhanced_source = f"{taxpayer_context}\n\n{source_summary}"
+
+        # Add specific prompts based on taxpayer situation
+        situation_prompts = []
+        context_lower = taxpayer_context.lower()
+
+        if "self-employed" in context_lower or "freelance" in context_lower:
+            situation_prompts.append(
+                "SELF-EMPLOYMENT CHECK: Verify Schedule C is included. "
+                "Check for home office deduction (Form 8829), health insurance deduction, "
+                "retirement contributions (SEP-IRA, Solo 401k), and QBI deduction (199A)."
+            )
+
+        if "home" in context_lower and ("office" in context_lower or "work" in context_lower):
+            situation_prompts.append(
+                "HOME OFFICE CHECK: Is Form 8829 or simplified method claimed? "
+                "Calculate potential deduction if missing."
+            )
+
+        if "invest" in context_lower or "stock" in context_lower or "rsu" in context_lower:
+            situation_prompts.append(
+                "INVESTMENT CHECK: Verify cost basis accuracy (especially RSUs). "
+                "Check for tax-loss harvesting opportunities and wash sale compliance."
+            )
+
+        # Use agent's review method but append situation-specific prompts
+        base_review = self.agent.review_tax_return(return_text, enhanced_source)
+
+        # If we have specific situation prompts, do a follow-up analysis
+        if situation_prompts:
+            follow_up = "\n\n".join(situation_prompts)
+            follow_up_review = self.agent._call(
+                system="You are a tax optimization specialist. Given the taxpayer's specific situation, check for these commonly missed deductions and credits. Be specific about dollar amounts when possible.",
+                user_message=f"""Taxpayer situation:
+{taxpayer_context}
+
+Return text (excerpt):
+{return_text[:4000]}
+
+SPECIFIC CHECKS:
+{follow_up}
+
+List any missed deductions or optimization opportunities as:
+**OPPORTUNITY**: [description]
+- Potential savings: $X
+- Action: [what to do]""",
+                max_tokens=2000,
+            )
+            return f"{base_review}\n\n## Situation-Specific Review\n{follow_up_review}"
+
+        return base_review
 
     def _run_rule_based_checks(
         self,
@@ -202,6 +299,7 @@ class ReturnReviewer:
             "error": ReviewSeverity.ERROR,
             "warning": ReviewSeverity.WARNING,
             "suggestion": ReviewSeverity.SUGGESTION,
+            "opportunity": ReviewSeverity.SUGGESTION,  # Map opportunity to suggestion
             "info": ReviewSeverity.INFO,
         }
 
