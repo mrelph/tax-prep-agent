@@ -354,7 +354,7 @@ def main(
 
 
 def _start_interactive_mode() -> None:
-    """Start the interactive Agent SDK mode."""
+    """Start the interactive Agent SDK mode with Claude Code-style UI."""
     from tax_agent.chat import TaxAdvisorChat
     from tax_agent.slash_commands import get_all_command_names
 
@@ -374,71 +374,88 @@ def _start_interactive_mode() -> None:
     tax_year = config.tax_year
     advisor = TaxAdvisorChat(tax_year)
 
-    # Check SDK status
-    sdk_status = "Agent SDK" if config.use_agent_sdk else "Legacy"
+    # Get document count for status
+    def get_doc_count():
+        try:
+            from tax_agent.storage.database import get_database
+            db = get_database()
+            return len(db.get_documents())
+        except Exception:
+            return 0
 
+    # Print welcome banner
     rprint(Panel.fit(
         "[bold blue]Tax Prep Agent[/bold blue]\n\n"
-        f"Tax Year: {tax_year}\n"
-        f"State: {config.state or 'Not set'}\n"
-        f"Mode: {sdk_status}\n\n"
-        "[bold]Commands:[/bold] (Tab to autocomplete)\n"
-        "  /help     - Show all slash commands\n"
-        "  /status   - View current status\n"
-        "  /analyze  - Run tax analysis\n"
-        "  /optimize - Find deductions\n\n"
-        "Or just ask a question about your taxes!\n\n"
-        "[dim]Keyboard: Ctrl+C to exit • Ctrl+D for status • Tab for autocomplete[/dim]",
+        "Type [cyan]/help[/cyan] for commands or ask any tax question.\n"
+        "[dim]Tab: autocomplete • ↑↓: history • Ctrl+C: exit[/dim]",
         title="Interactive Mode"
     ))
-
-    # Show suggestions based on collected documents
-    suggestions = advisor.suggest_topics()
-    if suggestions:
-        rprint("\n[dim]Try asking:[/dim]")
-        for s in suggestions[:3]:
-            rprint(f"  [cyan]• {s}[/cyan]")
     rprint("")
 
-    # Set up prompt with autocomplete
+    # Set up prompt with Claude Code-style features
     try:
-        from prompt_toolkit import prompt as pt_prompt
-        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.completion import WordCompleter, FuzzyWordCompleter
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-        from prompt_toolkit.history import InMemoryHistory
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.styles import Style
+        from prompt_toolkit.formatted_text import HTML
 
-        # Create completer with slash commands
+        # Persistent history file
+        history_file = config.config_dir / ".command_history"
+        history = FileHistory(str(history_file))
+
+        # Create fuzzy completer with slash commands
         commands = get_all_command_names()
-        command_completer = WordCompleter(
+        command_completer = FuzzyWordCompleter(
             commands,
-            ignore_case=True,
-            match_middle=False,
+            WORD=True,
         )
 
-        # Create history with all commands pre-populated for auto-suggest
-        history = InMemoryHistory()
-        for cmd in commands:
-            history.append_string(cmd)
+        # Style matching Claude Code aesthetic
+        style = Style.from_dict({
+            'prompt': 'ansigreen bold',
+            'bottom-toolbar': 'bg:#1a1a2e #aaaaaa',
+            'bottom-toolbar.text': '#aaaaaa',
+        })
 
-        def get_input():
-            return pt_prompt(
-                "> ",
-                completer=command_completer,
-                history=history,
-                auto_suggest=AutoSuggestFromHistory(),  # Shows ghost text inline
-                complete_while_typing=False,  # Tab to complete
+        # Bottom toolbar showing status (like Claude Code)
+        def get_toolbar():
+            doc_count = get_doc_count()
+            state = config.state or "—"
+            mode = "SDK" if config.use_agent_sdk else "Legacy"
+            return HTML(
+                f'<b>Tax Year:</b> {tax_year} │ '
+                f'<b>State:</b> {state} │ '
+                f'<b>Docs:</b> {doc_count} │ '
+                f'<b>Mode:</b> {mode} │ '
+                f'<style bg="#333355"> /help </style>'
             )
 
+        # Create session with all features
+        session = PromptSession(
+            history=history,
+            completer=command_completer,
+            auto_suggest=AutoSuggestFromHistory(),
+            style=style,
+            bottom_toolbar=get_toolbar,
+            complete_while_typing=True,
+            mouse_support=False,
+            refresh_interval=0.5,
+        )
+
+        def get_input():
+            return session.prompt("> ")
+
         has_autocomplete = True
+
     except ImportError:
         # Fall back to basic input if prompt_toolkit not available
         has_autocomplete = False
+        rprint(f"[dim]Tax Year: {tax_year} | State: {config.state or 'Not set'}[/dim]\n")
 
         def get_input():
-            return Prompt.ask("\n[bold green]>[/bold green]")
-
-    if has_autocomplete:
-        rprint("[dim]Tip: Type / then Tab to complete, or right-arrow to accept suggestion[/dim]\n")
+            return Prompt.ask("[bold green]>[/bold green]")
 
     # Main interaction loop
     while True:
