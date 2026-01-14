@@ -90,17 +90,44 @@ class TaxAdvisorChat:
         """
         Send a message and get a response.
 
+        Supports slash commands (e.g., /help, /status, /analyze) for
+        direct access to CLI features within the chat interface.
+
         Args:
             user_message: The user's question or message
 
         Returns:
-            AI response
+            AI response or slash command result
         """
+        # Check for slash commands
+        if user_message.strip().startswith("/"):
+            return self._handle_slash_command(user_message)
+
         # Use SDK if available and enabled
         if self._use_sdk():
             return self._chat_with_sdk(user_message)
 
         return self._chat_with_legacy(user_message)
+
+    def _handle_slash_command(self, user_message: str) -> str:
+        """Handle a slash command within the chat interface."""
+        from tax_agent.slash_commands import parse_slash_command, execute_slash_command
+        import asyncio
+
+        command_name, args = parse_slash_command(user_message)
+        if not command_name:
+            return "Invalid slash command. Type /help for available commands."
+
+        # Build context for the command
+        context = {
+            "tax_year": self.tax_year,
+            "state": self.state,
+            "source_dir": self._source_dir,
+        }
+
+        # Execute the command
+        result = asyncio.run(execute_slash_command(command_name, args, context))
+        return result
 
     def _chat_with_legacy(self, user_message: str) -> str:
         """Chat using the legacy agent (direct Anthropic SDK)."""
@@ -206,12 +233,34 @@ Provide a helpful, specific response. If you need to verify something against so
         """
         Send a message and stream the response (SDK only).
 
+        Supports slash commands (e.g., /help, /status, /analyze) for
+        direct access to CLI features within the chat interface.
+
         Args:
             user_message: The user's question or message
 
         Yields:
             Response chunks as they're generated
         """
+        # Check for slash commands
+        if user_message.strip().startswith("/"):
+            from tax_agent.slash_commands import parse_slash_command, execute_slash_command
+
+            command_name, args = parse_slash_command(user_message)
+            if not command_name:
+                yield "Invalid slash command. Type /help for available commands."
+                return
+
+            context = {
+                "tax_year": self.tax_year,
+                "state": self.state,
+                "source_dir": self._source_dir,
+            }
+
+            result = await execute_slash_command(command_name, args, context)
+            yield result
+            return
+
         if not self._use_sdk():
             # Fall back to sync for legacy
             yield self._chat_with_legacy(user_message)

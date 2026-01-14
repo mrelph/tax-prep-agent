@@ -838,9 +838,13 @@ def analyze(
     year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
     summary: Annotated[bool, typer.Option("--summary", "-s", help="Brief summary only")] = False,
     ai: Annotated[bool, typer.Option("--ai", help="Include AI-powered analysis")] = True,
-    agentic: Annotated[bool, typer.Option("--agentic", help="Use Agent SDK with tool access (requires SDK enabled)")] = False,
+    legacy: Annotated[bool, typer.Option("--legacy", help="Use legacy agent instead of Agent SDK")] = False,
 ) -> None:
-    """Analyze collected documents for tax implications."""
+    """Analyze collected documents for tax implications.
+
+    By default, uses the Agent SDK with agentic tool access for verification
+    and web research. Use --legacy to fall back to the standard agent.
+    """
     from tax_agent.analyzers.implications import TaxAnalyzer
 
     config = get_config()
@@ -849,11 +853,15 @@ def analyze(
         rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
         raise typer.Exit(1)
 
-    # Check if agentic mode requested but SDK not enabled
-    if agentic and not config.use_agent_sdk:
-        rprint("[yellow]Agent SDK not enabled. Enable with: tax-agent config set use_agent_sdk true[/yellow]")
-        rprint("[dim]Falling back to standard analysis...[/dim]\n")
-        agentic = False
+    # Determine if we should use agentic mode (SDK is default, legacy is opt-in)
+    use_agentic = config.use_agent_sdk and not legacy
+
+    # Check if SDK is available when we want to use it
+    if use_agentic:
+        from tax_agent.agent_sdk import sdk_available
+        if not sdk_available():
+            rprint("[dim]Agent SDK not available, using standard agent...[/dim]\n")
+            use_agentic = False
 
     tax_year = year or config.tax_year
 
@@ -924,9 +932,9 @@ def analyze(
     # AI Analysis
     if ai and not summary:
         rprint("\n")
-        if agentic:
-            # Use Agent SDK with streaming
-            rprint("[dim]Using Agent SDK with tool access...[/dim]\n")
+        if use_agentic:
+            # Use Agent SDK with streaming (default behavior)
+            rprint("[dim]Using Agent SDK with agentic analysis...[/dim]\n")
             try:
                 ai_analysis = _run_agentic_analysis(analyzer, tax_year)
             except Exception as e:
@@ -2254,6 +2262,249 @@ Task: {prompt}"""
         result = sdk_agent.invoke_subagent(name, context_prompt, source_dir)
 
     rprint(Panel(result, title=f"{subagent.name} Analysis", border_style="blue"))
+
+
+@ai_app.command("review-return")
+def ai_review_return(
+    return_file: Annotated[Path, typer.Argument(help="Path to completed tax return PDF")],
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+    thorough: Annotated[bool, typer.Option("--thorough", "-t", help="Extra thorough review with web research")] = False,
+) -> None:
+    """
+    AI-powered review of a completed tax return.
+
+    This enhanced review uses the Agent SDK to:
+    - Cross-reference all amounts against source documents
+    - Verify calculations match IRS requirements
+    - Search for missed deductions and credits
+    - Check for common filing errors
+    - Look up current tax rules when needed
+
+    More thorough than the basic 'review' command.
+    """
+    from tax_agent.collectors.ocr import extract_text_with_ocr
+    from tax_agent.storage.database import get_database
+    from tax_agent.utils import get_enum_value as _get_enum
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    # Resolve file path
+    resolved_file, suggestions = resolve_file_path(return_file)
+    if resolved_file is None:
+        rprint(f"[red]File not found: {return_file}[/red]")
+        if suggestions:
+            rprint("\n[dim]Did you mean one of these?[/dim]")
+            for s in suggestions[:5]:
+                rprint(f"  • {s}")
+        raise typer.Exit(1)
+
+    return_file = resolved_file
+    tax_year = year or config.tax_year
+
+    rprint(Panel.fit(
+        f"[bold]AI-Powered Tax Return Review[/bold]\n\n"
+        f"File: {return_file.name}\n"
+        f"Tax Year: {tax_year}\n"
+        f"Mode: {'Thorough (with web research)' if thorough else 'Standard'}",
+        title="Review Setup"
+    ))
+
+    # Extract return text
+    rprint("\n[cyan]Extracting return content...[/cyan]")
+    with console.status("[bold green]Processing tax return..."):
+        return_text = extract_text_with_ocr(return_file)
+
+    if not return_text or len(return_text.strip()) < 100:
+        rprint("[red]Could not extract sufficient text from the return.[/red]")
+        raise typer.Exit(1)
+
+    rprint(f"[dim]Extracted {len(return_text):,} characters from return[/dim]")
+
+    # Get source documents
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    if not documents:
+        rprint(f"[yellow]Warning: No source documents collected for {tax_year}.[/yellow]")
+        rprint("[dim]Review will be limited without source documents to cross-reference.[/dim]\n")
+
+    # Build source document summary
+    source_summaries = []
+    source_dir = None
+    for doc in documents:
+        summary = f"- {_get_enum(doc.document_type)} from {doc.issuer_name}"
+        if doc.extracted_data:
+            # Add key amounts for cross-reference
+            if _get_enum(doc.document_type) == "W2":
+                wages = doc.extracted_data.get("box_1", 0)
+                withheld = doc.extracted_data.get("box_2", 0)
+                summary += f": Wages ${wages:,.2f}, Fed withheld ${withheld:,.2f}"
+            elif "1099_INT" in _get_enum(doc.document_type):
+                interest = doc.extracted_data.get("box_1", 0)
+                summary += f": Interest ${interest:,.2f}"
+            elif "1099_DIV" in _get_enum(doc.document_type):
+                div = doc.extracted_data.get("box_1a", 0)
+                summary += f": Dividends ${div:,.2f}"
+            elif "1099_B" in _get_enum(doc.document_type):
+                proceeds = doc.extracted_data.get("summary", {}).get("total_proceeds", 0)
+                summary += f": Proceeds ${proceeds:,.2f}"
+        source_summaries.append(summary)
+
+        if doc.file_path and source_dir is None:
+            source_dir = Path(doc.file_path).parent
+
+    source_docs_text = "\n".join(source_summaries) if source_summaries else "No source documents available"
+
+    # Check if SDK is available for enhanced review
+    use_sdk = config.use_agent_sdk
+    if use_sdk:
+        from tax_agent.agent_sdk import sdk_available
+        use_sdk = sdk_available()
+
+    if use_sdk:
+        rprint("\n[cyan]Running AI-powered review with Agent SDK...[/cyan]")
+        rprint("[dim]The agent will cross-reference source documents and verify calculations.[/dim]\n")
+
+        from tax_agent.agent_sdk import get_sdk_agent
+
+        sdk_agent = get_sdk_agent()
+
+        # Build comprehensive review prompt
+        review_prompt = f"""You are an EXPERT IRS auditor reviewing a completed tax return.
+
+## YOUR TASK
+Perform a thorough review of this tax return. Cross-reference EVERY amount against the source documents.
+
+## SOURCE DOCUMENTS FOR {tax_year}:
+{source_docs_text}
+
+## TAX RETURN CONTENT:
+{return_text[:15000]}
+
+## REVIEW CHECKLIST - Check ALL of these:
+
+### 1. INCOME VERIFICATION (IRS matches these!)
+- [ ] W-2 wages match Line 1
+- [ ] 1099-INT interest on Schedule B
+- [ ] 1099-DIV dividends on Schedule B
+- [ ] 1099-B capital gains on Schedule D
+- [ ] Any missing income sources?
+
+### 2. DEDUCTION REVIEW
+- [ ] Standard vs itemized - is the choice optimal?
+- [ ] SALT deduction capped at $10,000?
+- [ ] Charitable contributions reasonable?
+- [ ] Above-the-line deductions claimed?
+
+### 3. CREDIT VERIFICATION
+- [ ] Child Tax Credit calculated correctly?
+- [ ] Education credits eligible?
+- [ ] Any missed credits?
+
+### 4. MATHEMATICAL ACCURACY
+- [ ] AGI calculation correct
+- [ ] Tax from tables matches income
+- [ ] Refund/owed arithmetic correct
+
+### 5. OPTIMIZATION OPPORTUNITIES
+- [ ] Could different filing status save money?
+- [ ] Retirement contributions maximized?
+- [ ] Tax-loss harvesting opportunities?
+
+## OUTPUT FORMAT
+For each finding, provide:
+- **SEVERITY**: ERROR (must fix) / WARNING (investigate) / OPPORTUNITY (money left on table)
+- **ISSUE**: Clear description with specific amounts
+- **EXPECTED vs ACTUAL**: What numbers should be
+- **TAX IMPACT**: Dollar amount at stake
+- **ACTION**: Specific fix or optimization
+
+Be AGGRESSIVE in finding issues. Cross-reference everything."""
+
+        if thorough:
+            review_prompt += """
+
+## ADDITIONAL THOROUGH CHECKS
+Since thorough mode is enabled:
+- Use WebSearch to verify current IRS limits and rules
+- Look up any uncertain tax treatments
+- Check for recent tax law changes that might apply
+- Verify state-specific rules if applicable"""
+
+        # Run the SDK review
+        response_parts = []
+
+        async def run_review():
+            include_web = thorough and config.agent_sdk_allow_web
+            async for chunk in sdk_agent.review_return_async(
+                return_text[:15000],
+                source_docs_text,
+                source_dir,
+            ):
+                response_parts.append(chunk)
+                rprint("[dim].[/dim]", end="")
+
+        with console.status("[bold green]AI agent is reviewing..."):
+            asyncio.run(run_review())
+
+        rprint()  # Newline after progress
+        review_result = "".join(response_parts)
+
+    else:
+        # Fall back to legacy agent
+        rprint("\n[yellow]Agent SDK not enabled. Using standard AI review.[/yellow]")
+        rprint("[dim]Enable SDK for enhanced review: tax-agent config set use_agent_sdk true[/dim]\n")
+
+        from tax_agent.agent import get_agent
+
+        agent = get_agent()
+        with console.status("[bold green]Running AI review..."):
+            review_result = agent.review_tax_return(return_text[:15000], source_docs_text)
+
+    # Display results
+    rprint(Panel(
+        review_result,
+        title="AI Tax Return Review",
+        border_style="blue",
+        padding=(1, 2),
+    ))
+
+    # Summary stats
+    errors = review_result.lower().count("error")
+    warnings = review_result.lower().count("warning")
+    opportunities = review_result.lower().count("opportunity")
+
+    rprint(f"\n[bold]Review Summary:[/bold]")
+    if errors > 0:
+        rprint(f"  [red]● {errors} potential error(s) found[/red]")
+    if warnings > 0:
+        rprint(f"  [yellow]● {warnings} warning(s) to investigate[/yellow]")
+    if opportunities > 0:
+        rprint(f"  [green]● {opportunities} optimization opportunity(ies)[/green]")
+
+    if errors == 0 and warnings == 0:
+        rprint("  [green]✓ No major issues detected[/green]")
+
+    # Export option
+    review_md = f"""# AI Tax Return Review - {tax_year}
+
+**File:** {return_file.name}
+**Review Date:** {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}
+**Mode:** {'Thorough' if thorough else 'Standard'}
+**Source Documents:** {len(documents)}
+
+---
+
+{review_result}
+
+---
+*Generated by Tax Prep Agent AI Review*
+"""
+    prompt_export(review_md, f"ai-review-{tax_year}", "AI review report")
 
 
 # Document subcommands

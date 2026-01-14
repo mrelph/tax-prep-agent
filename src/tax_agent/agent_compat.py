@@ -1,17 +1,23 @@
-"""Agent compatibility layer for gradual SDK migration.
+"""Agent compatibility layer with Claude Agent SDK as primary interface.
 
-This module provides a unified interface that works with both the legacy
-Anthropic SDK agent and the new Claude Agent SDK. Code can use this layer
-to automatically get SDK features when enabled, with transparent fallback
-to the legacy agent.
+The Claude Agent SDK is the primary interface for AI operations, providing:
+- Agentic loops with tool use for verification
+- Specialized subagents for different tax domains
+- Safety hooks for SSN redaction and file access control
+- Streaming responses for real-time feedback
+
+Legacy Anthropic SDK fallback is provided when the Agent SDK is unavailable.
 
 Usage:
     from tax_agent.agent_compat import get_compatible_agent
 
     agent = get_compatible_agent()
-    # Works the same regardless of backend:
+    # Uses Agent SDK by default:
     result = agent.classify_document(text)
     analysis = agent.analyze_tax_implications(docs, profile)
+
+    # Check which backend is active:
+    print(agent.backend_name)  # "agent_sdk" or "legacy"
 """
 
 from pathlib import Path
@@ -65,11 +71,16 @@ class TaxAgentInterface(Protocol):
 
 class CompatibleAgent:
     """
-    Compatibility layer that wraps both legacy and SDK agents.
+    Unified agent interface with Claude Agent SDK as the primary backend.
 
-    Automatically delegates to the SDK agent when enabled and available,
-    falling back to the legacy agent otherwise. This allows gradual migration
-    to SDK features without breaking existing code.
+    Uses the Agent SDK by default, which provides:
+    - Agentic verification with tool access
+    - Web search for current IRS rules and limits
+    - Specialized subagents for different tax domains
+    - Safety hooks for data protection
+
+    Falls back to the legacy Anthropic SDK when the Agent SDK is unavailable
+    (e.g., when claude-code-sdk package is not installed).
     """
 
     def __init__(self):

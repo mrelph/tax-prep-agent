@@ -61,8 +61,8 @@ class Config:
             "ocr_engine": "pytesseract",
             "auto_redact_ssn": True,
             "initialized": False,
-            # Agent SDK settings
-            "use_agent_sdk": False,  # Opt-in to new SDK features
+            # Agent SDK settings (SDK is the primary interface)
+            "use_agent_sdk": True,  # SDK is primary, set False for legacy mode
             "agent_sdk_max_turns": 10,  # Maximum agentic turns
             "agent_sdk_allow_web": True,  # Allow web search/fetch tools
         }
@@ -220,8 +220,8 @@ class Config:
 
     @property
     def use_agent_sdk(self) -> bool:
-        """Check if Agent SDK features are enabled."""
-        return self._config.get("use_agent_sdk", False)
+        """Check if Agent SDK features are enabled (default: True)."""
+        return self._config.get("use_agent_sdk", True)
 
     @use_agent_sdk.setter
     def use_agent_sdk(self, enabled: bool) -> None:
