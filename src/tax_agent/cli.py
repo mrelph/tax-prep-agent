@@ -406,7 +406,7 @@ def _start_interactive_mode() -> None:
     # Set up prompt with Claude Code-style features
     try:
         from prompt_toolkit import PromptSession
-        from prompt_toolkit.completion import FuzzyWordCompleter
+        from prompt_toolkit.completion import Completer, Completion
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.styles import Style
@@ -417,12 +417,39 @@ def _start_interactive_mode() -> None:
         history_file = config.config_dir / ".command_history"
         history = FileHistory(str(history_file))
 
-        # Create fuzzy completer with slash commands
+        # Custom completer for slash commands
         commands = get_all_command_names()
-        command_completer = FuzzyWordCompleter(
-            commands,
-            WORD=True,
-        )
+
+        class SlashCommandCompleter(Completer):
+            """Completer that triggers on / for slash commands."""
+
+            def get_completions(self, document, complete_event):
+                text = document.text_before_cursor.lstrip()
+
+                # Only complete if line starts with / or is empty
+                if not text or text.startswith('/'):
+                    word = text.lstrip('/')
+                    for cmd in commands:
+                        cmd_name = cmd.lstrip('/')
+                        if cmd_name.startswith(word) or not word:
+                            # Calculate how much to replace
+                            start_pos = -len(text) if text else 0
+                            yield Completion(
+                                cmd,
+                                start_position=start_pos,
+                                display=cmd,
+                                display_meta=self._get_meta(cmd),
+                            )
+
+            def _get_meta(self, cmd):
+                """Get command description for display."""
+                from tax_agent.slash_commands import get_command
+                command = get_command(cmd.lstrip('/'))
+                if command:
+                    return command.description[:30]
+                return ""
+
+        command_completer = SlashCommandCompleter()
 
         # Style matching Claude Code aesthetic
         style = Style.from_dict({
