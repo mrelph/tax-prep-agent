@@ -467,11 +467,11 @@ def cmd_analyze(args: list[str], context: dict) -> str:
     # Build documents summary
     doc_summary_lines = []
     for doc in docs:
-        doc_type = doc.get("document_type", "UNKNOWN")
-        issuer = doc.get("issuer_name", "Unknown")
-        if doc.get("extracted_data"):
+        doc_type = doc.document_type
+        issuer = doc.issuer_name
+        if doc.extracted_data:
             import json
-            data = json.dumps(doc["extracted_data"], indent=2)
+            data = json.dumps(doc.extracted_data, indent=2)
             doc_summary_lines.append(f"## {doc_type} from {issuer}\n{data}")
         else:
             doc_summary_lines.append(f"## {doc_type} from {issuer}")
