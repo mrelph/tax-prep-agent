@@ -144,6 +144,22 @@ class TaxAdvisorChat:
         else:
             context_parts.append("- No documents collected yet")
 
+        # Add tax context from TAX_CONTEXT.md steering document
+        try:
+            from tax_agent.context import get_tax_context
+            tax_ctx = get_tax_context()
+            if tax_ctx.exists():
+                content = tax_ctx.load()
+                if content:
+                    context_parts.append("")
+                    context_parts.append("TAX CONTEXT (from TAX_CONTEXT.md):")
+                    # Include the full context document
+                    if len(content) > 4000:
+                        content = content[:4000] + "\n... [truncated]"
+                    context_parts.append(content)
+        except Exception:
+            pass  # Context file optional
+
         # Add memories about the user
         try:
             from tax_agent.memory import MemoryManager

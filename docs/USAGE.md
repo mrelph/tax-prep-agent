@@ -818,6 +818,8 @@ tax-agent documents list [options]
 
 **Options:**
 - `--year, -y <year>`: Filter by tax year
+- `--folder, -f`: Show folder tree view organized by document type
+- `--tag, -t <tag>`: Filter documents by tag
 
 **Examples:**
 ```bash
@@ -826,22 +828,232 @@ tax-agent documents list
 
 # List documents for 2023
 tax-agent documents list --year 2023
+
+# Show folder tree view
+tax-agent documents list --folder
+
+# Filter by tag
+tax-agent documents list --tag primary
+
+# Combine filters
+tax-agent documents list --year 2024 --tag work --folder
+```
+
+**Table View Output:**
+```
+┌─────────────── Tax Documents - 2024 ───────────────┐
+│ ID        │ Type      │ Issuer           │ Tags   │ Status │
+│───────────│───────────│──────────────────│────────│────────│
+│ abc12345  │ W2        │ Google LLC       │ work   │ Ready  │
+│ def67890  │ 1099_INT  │ Chase Bank       │ -      │ Ready  │
+│ ghi11121  │ 1099_DIV  │ Vanguard         │ invest │ Ready  │
+│ jkl31415  │ 1099_B    │ E*TRADE          │ invest │ Review │
+│ mno16171  │ 1098      │ Wells Fargo      │ primary│ Ready  │
+└─────────────────────────────────────────────────────┘
+
+8 document(s) total | Tags: invest, primary, work
+```
+
+**Folder View Output:**
+```
+2024
+├─ Income/Employment
+│  ├─ W2 from Google LLC (abc12345) [work]
+│  └─ W2 from Apple Inc (pqr67890) [spouse]
+├─ Income/Investments
+│  ├─ 1099_INT from Chase Bank (def67890)
+│  ├─ 1099_DIV from Vanguard (ghi11121) [invest]
+│  └─ 1099_B from E*TRADE (jkl31415) [invest] *
+├─ Deductions/Mortgage
+│  └─ 1098 from Wells Fargo (mno16171) [primary]
+└─ Other
+   └─ UNKNOWN from IRS (stu12345) *
+
+Legend: * = Needs Review, [tag] = Tagged
+```
+
+---
+
+### `tax-agent documents folders`
+
+Display documents organized in a tree view by category.
+
+**Usage:**
+```bash
+tax-agent documents folders [options]
+```
+
+**Options:**
+- `--year, -y <year>`: Tax year to display
+
+**Examples:**
+```bash
+# Show folder organization for current year
+tax-agent documents folders
+
+# Show for specific year
+tax-agent documents folders --year 2023
+```
+
+**Folder Categories:**
+
+Documents are automatically organized into these categories:
+
+**Income Documents:**
+- **Income/Employment**: W-2, W-2G
+- **Income/Investments**: 1099-INT (interest), 1099-DIV (dividends), 1099-B (brokerage)
+- **Income/Self-Employment**: 1099-NEC, 1099-MISC, K-1
+- **Income/Retirement**: 1099-R (retirement distributions)
+- **Income/Government**: 1099-G (government payments), 1099-K (payment cards)
+
+**Deduction Documents:**
+- **Deductions/Mortgage**: 1098 (mortgage interest)
+- **Deductions/Education**: 1098-T (tuition), 1098-E (student loan interest)
+- **Deductions/Retirement**: 5498 (IRA contributions)
+
+**Tax Returns:**
+- **Returns/Federal**: 1040, 1040-SR, 1040-NR, 1040-X
+- **Returns/Schedules**: Schedule A, B, C, D, E, SE
+- **Returns/State**: State income tax returns
+
+**Other:**
+- Documents that don't fit standard categories
+
+---
+
+### `tax-agent documents tag`
+
+Add custom tags to documents for organization and filtering.
+
+**Usage:**
+```bash
+tax-agent documents tag <document_id> <tag1> [tag2] [tag3] ...
+```
+
+**Examples:**
+```bash
+# Add a single tag
+tax-agent documents tag abc123 primary
+
+# Add multiple tags at once
+tax-agent documents tag abc123 work google rsus important
+
+# Use partial ID (must be unique)
+tax-agent documents tag abc primary spouse
+
+# Tag multiple aspects
+tax-agent documents tag def789 q1-estimated verified paid
+```
+
+**Common Tag Strategies:**
+
+**By Importance:**
+- `primary`, `secondary`, `critical`, `review-needed`, `optional`
+
+**By Owner:**
+- `mine`, `spouse`, `joint`, `dependent`
+
+**By Source:**
+- `work`, `side-gig`, `investments`, `rental`, `retirement`
+
+**By Status:**
+- `verified`, `needs-update`, `pending`, `complete`, `flagged`
+
+**By Category:**
+- `rsu-2024`, `q1-estimated`, `home-office`, `medical`, `charitable`
+
+**By Company/Institution:**
+- `google`, `apple`, `vanguard`, `fidelity`, `chase`
+
+**Example Workflow:**
+```bash
+# Tag W-2s by source
+tax-agent documents tag abc123 work google primary verified
+tax-agent documents tag def456 work apple spouse verified
+
+# Tag investment docs
+tax-agent documents tag ghi789 investments vanguard dividends
+tax-agent documents tag jkl012 investments etrade rsus flagged
+
+# Tag estimated tax payments
+tax-agent documents tag mno345 q1-estimated paid verified
+tax-agent documents tag pqr678 q2-estimated pending
+```
+
+---
+
+### `tax-agent documents untag`
+
+Remove tags from a document.
+
+**Usage:**
+```bash
+tax-agent documents untag <document_id> <tag1> [tag2] [tag3] ...
+```
+
+**Examples:**
+```bash
+# Remove a single tag
+tax-agent documents untag abc123 pending
+
+# Remove multiple tags
+tax-agent documents untag abc123 review-needed critical flagged
+
+# Use partial ID
+tax-agent documents untag abc pending
+```
+
+**Common Use Cases:**
+- Remove temporary status tags: `untag abc pending`, `untag def review-needed`
+- Clean up after verification: `untag ghi needs-update flagged`
+- Remove outdated tags: `untag jkl q1-estimated`
+
+---
+
+### `tax-agent documents tags`
+
+List all tags currently in use with document counts.
+
+**Usage:**
+```bash
+tax-agent documents tags [options]
+```
+
+**Options:**
+- `--year, -y <year>`: Filter by tax year
+
+**Examples:**
+```bash
+# List all tags for current year
+tax-agent documents tags
+
+# List tags for 2023
+tax-agent documents tags --year 2023
 ```
 
 **Output:**
 ```
-┌─────────────── Tax Documents - 2024 ───────────────┐
-│ ID        │ Type      │ Issuer           │ Status │
-│───────────│───────────│──────────────────│────────│
-│ abc12345  │ W2        │ Google LLC       │ Ready  │
-│ def67890  │ 1099_INT  │ Chase Bank       │ Ready  │
-│ ghi11121  │ 1099_DIV  │ Vanguard         │ Ready  │
-│ jkl31415  │ 1099_B    │ E*TRADE          │ Review │
-│ mno16171  │ 1098      │ Wells Fargo      │ Ready  │
-└─────────────────────────────────────────────────────┘
+┌────────── Tags - 2024 ──────────┐
+│ Tag            │ Documents      │
+│────────────────│────────────────│
+│ critical       │ 2              │
+│ invest         │ 5              │
+│ primary        │ 8              │
+│ q1-estimated   │ 1              │
+│ spouse         │ 3              │
+│ verified       │ 12             │
+│ work           │ 5              │
+└─────────────────────────────────┘
 
-8 document(s) total
+No tags in use for tax year 2024.
+Add tags with: tax-agent documents tag <doc_id> <tag1> [tag2] ...
 ```
+
+**Use Cases:**
+- See which tags are being used across your documents
+- Identify inconsistent tag naming (e.g., `work` vs `employment`)
+- Find orphaned tags that might need cleanup
+- Plan your tagging strategy
 
 ---
 
@@ -1214,6 +1426,370 @@ Recent Changes:
 ```
 TX has NO state income tax!
 ```
+
+## Tax Context Management
+
+The Tax Context feature provides a persistent steering document (`TAX_CONTEXT.md`) that helps the AI understand your specific tax situation. Similar to how `CLAUDE.md` works for coding projects, this file provides ongoing context that improves AI analysis accuracy and personalization.
+
+### Overview
+
+**Location:** `~/.tax-agent/TAX_CONTEXT.md`
+
+**Purpose:**
+- Give the AI persistent context about your tax situation
+- Avoid repeating the same information in every conversation
+- Get more personalized and relevant tax advice
+- Help the AI focus on what matters to you
+
+**How It Works:**
+When you have a TAX_CONTEXT.md file, the AI automatically includes it when analyzing your documents, answering questions, or providing recommendations. The more detail you provide, the better the AI can tailor its guidance.
+
+### Interactive Mode Commands
+
+All context commands work in interactive mode with the `/context` slash command:
+
+```bash
+# View your current tax context
+/context show
+
+# Create a new tax context from template
+/context create
+
+# Open in your default editor
+/context edit
+
+# View summary and extracted info
+/context info
+
+# Reset to fresh template (requires --force)
+/context reset --force
+
+# Show file path
+/context path
+```
+
+### Getting Started
+
+**Step 1: Create Your Context**
+
+```
+You: /context create
+
+Agent: ✓ Created TAX_CONTEXT.md at `/Users/you/.tax-agent/TAX_CONTEXT.md`
+
+The file has been populated with a template. Edit it to describe
+your tax situation.
+
+Use `/context edit` to open in your editor, or `/context show` to view.
+```
+
+**Step 2: Edit the File**
+
+```
+You: /context edit
+
+Agent: ✓ Opening `/Users/you/.tax-agent/TAX_CONTEXT.md` in your editor...
+
+[Your default editor opens with the template]
+```
+
+The editor used is determined by:
+1. `$EDITOR` environment variable (if set)
+2. Platform defaults: `open` (macOS), `xdg-open` (Linux), `notepad` (Windows)
+3. Common editors: `code`, `nano`, `vim`, `gedit`, `notepad++`
+
+**Step 3: Fill in Your Information**
+
+The template includes these sections:
+
+### Template Sections
+
+#### 1. Taxpayer Profile
+```markdown
+- **Filing Status:** [Single / Married Filing Jointly / ...]
+- **State:** CA
+- **Dependents:** 2 children (ages 5, 8)
+- **Occupation:** Software Engineer
+```
+
+#### 2. Income Sources
+```markdown
+- [x] W-2 Employment (primary job)
+- [x] W-2 Employment (secondary/spouse)
+- [ ] Self-employment / 1099-NEC
+- [x] Investment income (dividends, interest, capital gains)
+- [ ] Rental property income
+- [ ] Retirement distributions
+```
+
+#### 3. Stock Compensation
+```markdown
+- **RSUs:** Yes - Google, ~$200K/year vesting
+- **ISOs:** Yes - Exercised 10,000 shares in 2023, AMT planning
+- **NSOs:** No
+- **ESPP:** Yes - 15% discount, qualifying dispositions
+```
+
+#### 4. Key Tax Considerations
+```markdown
+- Focus on minimizing AMT from ISO exercises
+- Planning backdoor Roth IRA contribution
+- Considering tax-loss harvesting strategy
+- Have home office but not claiming deduction
+```
+
+#### 5. Tax Goals for 2024
+```markdown
+- [x] Maximize refund
+- [ ] Minimize tax owed
+- [x] Reduce AGI for specific purpose (ACA subsidies)
+- [x] Optimize retirement contributions
+- [x] Tax-loss harvesting
+- [ ] Plan for major life event
+```
+
+#### 6. Important Notes
+```markdown
+- Underpaid estimated taxes in Q2 due to large RSU vest
+- Planning to max out 401(k) and backdoor Roth
+- Moved from NY to CA in June (multi-state filing)
+- Sold primary residence in March (exclusion applies)
+```
+
+#### 7. History & Prior Years
+```markdown
+- **Carryforwards:** $3,000 capital loss carryforward from 2023
+- **Estimated payments made:** Q1: $5,000, Q2: $8,000, Q3: $6,000, Q4: TBD
+- **Prior year refund/owed:** 2023 owed $2,500
+```
+
+### Example Tax Context
+
+Here's a complete example of a filled-in TAX_CONTEXT.md:
+
+```markdown
+# Tax Context
+
+## Taxpayer Profile
+
+- **Filing Status:** Married Filing Jointly
+- **State:** CA
+- **Dependents:** 2 children (ages 5, 8)
+- **Occupation:** Software Engineer / Product Manager
+
+## Income Sources
+
+- [x] W-2 Employment (primary job)
+- [x] W-2 Employment (secondary/spouse)
+- [ ] Self-employment / 1099-NEC
+- [x] Investment income (dividends, interest, capital gains)
+- [ ] Rental property income
+- [ ] Retirement distributions
+
+## Stock Compensation
+
+- **RSUs:** Yes - Google, ~$200K/year vesting quarterly
+- **ISOs:** Yes - Startup, 50,000 options, considering exercise timing
+- **NSOs:** No
+- **ESPP:** Yes - 15% discount, holding for qualifying dispositions
+
+## Key Tax Considerations
+
+- RSU withholding typically 22% but marginal rate is 32% - need extra withholding
+- ISO AMT planning - considering exercising 10,000 shares this year
+- Maxing out 401(k) contributions for both spouses
+- Contributing to 529 plans for children
+- Have HSA-eligible HDHP - maximizing HSA contributions
+- Charitable giving planned: $15,000 to donor-advised fund
+
+## Tax Goals for 2024
+
+- [x] Minimize tax owed
+- [x] Optimize retirement contributions
+- [x] Reduce AGI for specific purpose (maximize Roth IRA eligibility)
+- [x] Tax-loss harvesting
+- [ ] Plan for major life event
+
+Goal: Keep combined federal + CA tax under 35% effective rate
+
+## Important Notes
+
+- Underpaid estimated taxes in Q2 due to unexpected RSU vest
+- Both maxing 401(k): $23,000 each
+- Planning backdoor Roth IRA for both spouses
+- Have home office but employer doesn't require it (no deduction)
+- Mortgage interest ~$30,000/year (will itemize)
+- Property taxes $12,000 (SALT cap applies)
+
+## History & Prior Years
+
+- **Carryforwards:** $3,000 capital loss from 2023 wash sale
+- **Estimated payments made:**
+  - Q1 2024: $8,000
+  - Q2 2024: $12,000 (increased due to Q1 underpayment)
+  - Q3 2024: $10,000
+  - Q4 2024: Planning $10,000
+- **Prior year refund/owed:** 2023 owed $3,200 + $150 penalty
+
+---
+*Last updated: 2024-01-15*
+```
+
+### How the AI Uses Your Context
+
+Once you have TAX_CONTEXT.md set up, the AI will:
+
+1. **Personalized Analysis**
+   - When you run `/analyze`, it considers your filing status, dependents, and state
+   - Calculations use your specific tax bracket and deduction strategy
+
+2. **Focused Recommendations**
+   - Suggestions align with your stated tax goals
+   - Stock compensation advice tailored to your RSU/ISO/ESPP situation
+   - Deduction discovery focuses on relevant categories
+
+3. **Contextual Responses**
+   - Questions about taxes get answers specific to your situation
+   - "Should I itemize?" considers your mortgage interest and property taxes
+   - "How do RSUs affect my taxes?" uses your actual compensation details
+
+4. **Proactive Reminders**
+   - "You mentioned backdoor Roth - have you made your contribution?"
+   - "Your Q4 estimated payment is coming up"
+   - "Don't forget about your capital loss carryforward"
+
+### Viewing Context Information
+
+**Show Full Context:**
+```
+You: /context show
+
+Agent: # Tax Context
+
+**File:** `/Users/you/.tax-agent/TAX_CONTEXT.md`
+**Last modified:** 2024-01-15 14:30
+
+---
+
+[Full contents of your TAX_CONTEXT.md file]
+```
+
+**Show Summary:**
+```
+You: /context info
+
+Agent: # Tax Context Info
+
+**Path:** `/Users/you/.tax-agent/TAX_CONTEXT.md`
+**Size:** 1,247 bytes
+**Sections:** 7
+**Modified:** 2024-01-15 14:30
+**Has Content:** Yes
+
+## Extracted Info
+- **filing_status:** Married Filing Jointly
+- **state:** CA
+- **dependents:** 2 children (ages 5, 8)
+- **occupation:** Software Engineer / Product Manager
+- **has_stock_compensation:** True
+- **selected_items:** W-2 Employment (primary job), W-2 Employment (secondary/spouse), Investment income, Minimize tax owed, Optimize retirement contributions, Reduce AGI for specific purpose, Tax-loss harvesting
+```
+
+### Editing Your Context
+
+**Open in Editor:**
+```
+You: /context edit
+
+Agent: ✓ Opening `/Users/you/.tax-agent/TAX_CONTEXT.md` in your editor...
+```
+
+**Or Edit Manually:**
+The file is just a Markdown file at `~/.tax-agent/TAX_CONTEXT.md`. You can edit it with any text editor:
+
+```bash
+# macOS
+open ~/.tax-agent/TAX_CONTEXT.md
+
+# Linux
+xdg-open ~/.tax-agent/TAX_CONTEXT.md
+nano ~/.tax-agent/TAX_CONTEXT.md
+
+# Windows
+notepad %USERPROFILE%\.tax-agent\TAX_CONTEXT.md
+```
+
+### Resetting Your Context
+
+If you want to start over with a fresh template:
+
+```
+You: /context reset
+
+Agent: ⚠️ This will replace your existing TAX_CONTEXT.md with a fresh template.
+
+To confirm, run: `/context reset --force`
+
+You: /context reset --force
+
+Agent: ✓ Reset TAX_CONTEXT.md to default template at
+`/Users/you/.tax-agent/TAX_CONTEXT.md`
+```
+
+### Best Practices
+
+**Keep It Current:**
+- Update at the start of each tax year
+- Add notes about major life events (marriage, children, job change, home purchase)
+- Record estimated tax payments as you make them
+- Note carryforwards from prior years
+
+**Be Specific:**
+- Instead of "stock compensation," write "RSUs from Google, ~$200K/year"
+- Include actual dollar amounts where relevant
+- Note specific tax concerns or planning strategies
+- Mention any unusual circumstances
+
+**Focus on What Matters:**
+- Don't include everything - focus on what's relevant to your situation
+- If you don't have rental income, leave that section blank or remove it
+- Use checkboxes to mark applicable items
+- Add custom sections if needed (e.g., "## Cryptocurrency" or "## Foreign Income")
+
+**Security Note:**
+- TAX_CONTEXT.md is stored locally on your machine
+- It's included in AI prompts, so avoid putting full SSN or bank account numbers
+- Use descriptive amounts rather than exact figures if concerned ("~$200K" vs "$197,433.26")
+
+### Example Workflows
+
+**Workflow 1: First-Time Setup**
+```
+1. /context create          # Create template
+2. /context edit            # Open in editor
+3. [Fill in your information]
+4. /context info            # Verify it worked
+5. /analyze                 # Get personalized analysis
+```
+
+**Workflow 2: Update for New Year**
+```
+1. /context show            # Review current context
+2. /context edit            # Open for editing
+3. [Update year, goals, carryforwards]
+4. Save and close
+5. /context info            # Confirm changes
+```
+
+**Workflow 3: Add Mid-Year Notes**
+```
+1. /context edit
+2. [Add to "Important Notes": "Sold ESPP shares in Q3"]
+3. Save and close
+4. /optimize                # Get updated recommendations
+```
+
+---
 
 ## Google Drive Integration
 

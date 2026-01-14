@@ -44,6 +44,8 @@ Tab-completable slash commands provide structured access to all features:
 - **Encrypted Storage**: All tax data is stored in an encrypted SQLite database using SQLCipher
 - **Batch Processing**: Process entire directories of tax documents at once
 - **High Accuracy**: Uses Claude's vision capabilities to extract structured data from PDFs and images
+- **Document Organization**: Tag documents and view them organized by type (Income/Employment, Income/Investments, Deductions/Mortgage, etc.)
+- **Flexible Tagging System**: Add custom tags to documents for easy filtering and organization
 
 ### AI-Powered Tax Analysis
 - **Tax Implications Analysis**: Comprehensive review of your tax situation based on collected documents
@@ -75,6 +77,12 @@ Tab-completable slash commands provide structured access to all features:
 - **Secure Key Storage**: API keys and passwords stored in system keyring (Keychain/Windows Credential Manager)
 - **Automatic Redaction**: SSN and EIN redaction before sending data to AI (configurable)
 - **Local Processing**: OCR and PDF parsing happen locally before AI analysis
+
+### Tax Context Steering
+- **Persistent Context File**: TAX_CONTEXT.md provides ongoing context about your tax situation (similar to CLAUDE.md for coding projects)
+- **Intelligent Template**: Pre-structured sections for taxpayer profile, income sources, stock compensation, goals, and more
+- **AI-Aware**: Context is automatically included in AI analysis to provide more personalized guidance
+- **Easy Editing**: Open directly in your preferred editor with `/context edit`
 
 ### AI Provider Flexibility
 - **Anthropic API**: Direct integration with Claude via Anthropic API (default)
@@ -206,6 +214,9 @@ Just ask questions in plain English:
 | `/help` | Show all commands | `/help` |
 | `/status` | View current status | `/status` |
 | `/documents` | List collected documents | `/documents list` |
+| `/documents folders` | Show folder tree view | `/documents folders` |
+| `/documents tag <id> <tags>` | Add tags to document | `/documents tag abc123 primary work` |
+| `/documents tags` | List all tags in use | `/documents tags` |
 | `/collect <file>` | Add a document | `/collect ~/Downloads/w2.pdf` |
 | `/analyze` | Run tax analysis | `/analyze` |
 | `/optimize` | Find deductions | `/optimize` |
@@ -213,6 +224,7 @@ Just ask questions in plain English:
 | `/subagents` | List AI specialists | `/subagents` |
 | `/review <file>` | Review tax return | `/review ~/return.pdf` |
 | `/config` | View/change settings | `/config get state` |
+| `/context` | Manage tax context file | `/context show` |
 
 The agent intelligently routes complex tasks to specialized subagents for deeper expertise.
 
@@ -376,10 +388,96 @@ tax-agent documents list
 
 # List for specific year
 tax-agent documents list --year 2023
+
+# Show folder tree view
+tax-agent documents list --folder
+
+# Filter by tag
+tax-agent documents list --tag primary
 ```
 
 **Options**:
 - `--year, -y`: Filter by tax year
+- `--folder, -f`: Show folder tree view organized by document type
+- `--tag, -t`: Filter documents by tag
+
+#### `tax-agent documents folders`
+Display documents organized in a tree view by category.
+
+```bash
+# Show folder organization for current year
+tax-agent documents folders
+
+# Show for specific year
+tax-agent documents folders --year 2023
+```
+
+**Folder Categories**:
+- **Income/Employment**: W-2, W-2G
+- **Income/Investments**: 1099-INT, 1099-DIV, 1099-B
+- **Income/Self-Employment**: 1099-NEC, 1099-MISC, K-1
+- **Income/Retirement**: 1099-R
+- **Income/Government**: 1099-G, 1099-K
+- **Deductions/Mortgage**: 1098
+- **Deductions/Education**: 1098-T, 1098-E
+- **Deductions/Retirement**: 5498
+- **Returns/Federal**: 1040, 1040-SR, 1040-NR, 1040-X
+- **Returns/Schedules**: Schedule A, B, C, D, E, SE
+- **Returns/State**: State returns
+
+#### `tax-agent documents tag <id> <tags>`
+Add custom tags to a document for organization.
+
+```bash
+# Add single tag
+tax-agent documents tag abc123 primary
+
+# Add multiple tags
+tax-agent documents tag abc123 work google rsus important
+
+# Partial ID matching
+tax-agent documents tag abc primary spouse
+```
+
+**Use cases**:
+- Flag important documents: `primary`, `review-needed`, `critical`
+- Organize by source: `work`, `spouse`, `investments`, `rental`
+- Track status: `verified`, `needs-update`, `pending`
+- Group related docs: `q1-estimated`, `rsu-2024`, `home-office`
+
+#### `tax-agent documents untag <id> <tags>`
+Remove tags from a document.
+
+```bash
+# Remove single tag
+tax-agent documents untag abc123 pending
+
+# Remove multiple tags
+tax-agent documents untag abc123 review-needed critical
+```
+
+#### `tax-agent documents tags`
+List all tags currently in use with document counts.
+
+```bash
+# List tags for current year
+tax-agent documents tags
+
+# List tags for specific year
+tax-agent documents tags --year 2023
+```
+
+**Output example**:
+```
+┌─────── Tags - 2024 ───────┐
+│ Tag        │ Documents    │
+│────────────│──────────────│
+│ primary    │ 8            │
+│ spouse     │ 3            │
+│ verified   │ 12           │
+│ work       │ 5            │
+└───────────────────────────┘
+```
 
 #### `tax-agent documents show <id>`
 Show detailed information about a specific document.
@@ -398,6 +496,7 @@ tax-agent documents show abc
 - Tax year
 - Confidence score
 - Review status
+- Tags (if any)
 - All extracted data (structured JSON)
 - Source file path
 
@@ -447,6 +546,124 @@ Update your Anthropic API key.
 ```bash
 tax-agent config api-key
 ```
+
+### Tax Context Management
+
+The Tax Context feature provides a persistent steering document (TAX_CONTEXT.md) that helps the AI understand your specific tax situation, similar to how CLAUDE.md works for coding projects.
+
+#### Creating Your Tax Context
+
+**Interactive Mode:**
+```
+/context create
+```
+
+**CLI:**
+The context file is created automatically when you use `/context` commands. It's located at:
+- `~/.tax-agent/TAX_CONTEXT.md`
+
+#### What Goes in the Tax Context
+
+The template includes sections for:
+- **Taxpayer Profile**: Filing status, state, dependents, occupation
+- **Income Sources**: Employment, self-employment, investments, rental, retirement
+- **Stock Compensation**: RSUs, ISOs, NSOs, ESPP details
+- **Key Tax Considerations**: Specific things the AI should focus on
+- **Tax Goals**: Maximize refund, minimize tax, reduce AGI, etc.
+- **Important Notes**: Anything else relevant to your situation
+- **History & Prior Years**: Carryforwards, estimated payments, prior refunds/owed
+
+#### Tax Context Commands
+
+**Interactive Mode Commands:**
+
+```bash
+# View your tax context
+/context show
+
+# Create from template
+/context create
+
+# Open in your editor (uses $EDITOR or platform default)
+/context edit
+
+# View summary and extracted info
+/context info
+
+# Reset to fresh template
+/context reset --force
+
+# Show file path
+/context path
+```
+
+**Example Usage:**
+
+```
+You: /context create
+
+Agent: ✓ Created TAX_CONTEXT.md at `/Users/you/.tax-agent/TAX_CONTEXT.md`
+
+The file has been populated with a template. Edit it to describe
+your tax situation.
+
+Use `/context edit` to open in your editor, or `/context show` to view.
+
+You: /context edit
+
+Agent: ✓ Opening `/Users/you/.tax-agent/TAX_CONTEXT.md` in your editor...
+```
+
+**How It Helps:**
+
+Once you fill in your TAX_CONTEXT.md, the AI will:
+- Provide more personalized tax advice based on your situation
+- Remember your filing status, dependents, and income sources
+- Focus on relevant deductions for your circumstances
+- Tailor stock compensation analysis to your specific equity types
+- Reference your tax goals when making recommendations
+
+**Example Context:**
+
+```markdown
+# Tax Context
+
+## Taxpayer Profile
+
+- **Filing Status:** Married Filing Jointly
+- **State:** CA
+- **Dependents:** 2 children (ages 5, 8)
+- **Occupation:** Software Engineer
+
+## Income Sources
+
+- [x] W-2 Employment (primary job)
+- [x] Investment income (dividends, interest, capital gains)
+- [ ] Self-employment / 1099-NEC
+- [ ] Rental property income
+
+## Stock Compensation
+
+- **RSUs:** Yes - Google, ~$200K/year vesting
+- **ESPP:** Yes - 15% discount, qualifying dispositions
+- **ISOs:** No
+- **NSOs:** No
+
+## Tax Goals for 2024
+
+- [x] Minimize tax owed
+- [x] Optimize retirement contributions
+- [ ] Reduce AGI for specific purpose
+- [x] Tax-loss harvesting
+
+## Important Notes
+
+- Underpaid estimated taxes in Q2 due to RSU vest
+- Planning to max out 401(k) and backdoor Roth
+- Have home office but not claiming deduction
+```
+
+When this context is in place, the AI will automatically consider your married filing jointly status, California residency, RSU situation, and tax goals when providing guidance.
 
 ## Configuration Options
 

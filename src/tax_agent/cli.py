@@ -566,11 +566,13 @@ config_app = typer.Typer(help="Manage configuration")
 research_app = typer.Typer(help="Research current tax code and rules")
 drive_app = typer.Typer(help="Google Drive integration")
 ai_app = typer.Typer(help="Advanced AI-powered tax analysis")
+context_app = typer.Typer(help="Manage tax context steering document")
 app.add_typer(documents_app, name="documents")
 app.add_typer(config_app, name="config")
 app.add_typer(research_app, name="research")
 app.add_typer(drive_app, name="drive")
 app.add_typer(ai_app, name="ai")
+app.add_typer(context_app, name="context")
 
 
 @app.command()
@@ -2738,8 +2740,11 @@ Since thorough mode is enabled:
 @documents_app.command("list")
 def documents_list(
     year: Annotated[Optional[int], typer.Option("--year", "-y", help="Filter by tax year")] = None,
+    folder: Annotated[bool, typer.Option("--folder", "-f", help="Show folder tree view")] = False,
+    tag: Annotated[Optional[str], typer.Option("--tag", "-t", help="Filter by tag")] = None,
 ) -> None:
     """List all collected tax documents."""
+    from rich.tree import Tree
     from tax_agent.storage.database import get_database
 
     config = get_config()
@@ -2750,29 +2755,59 @@ def documents_list(
 
     tax_year = year or config.tax_year
     db = get_database()
-    documents = db.get_documents(tax_year=tax_year)
+
+    # Build filter
+    tag_filter = [tag] if tag else None
+    documents = db.get_documents(tax_year=tax_year, tags=tag_filter)
 
     if not documents:
-        rprint(f"[yellow]No documents collected for tax year {tax_year}.[/yellow]")
+        if tag:
+            rprint(f"[yellow]No documents with tag '{tag}' for tax year {tax_year}.[/yellow]")
+        else:
+            rprint(f"[yellow]No documents collected for tax year {tax_year}.[/yellow]")
         return
 
-    table = Table(title=f"Tax Documents - {tax_year}")
-    table.add_column("ID", style="dim")
-    table.add_column("Type", style="cyan")
-    table.add_column("Issuer", style="white")
-    table.add_column("Status", style="green")
+    if folder:
+        # Folder tree view
+        from tax_agent.models.documents import group_documents_by_folder
+        by_folder = group_documents_by_folder(documents)
 
-    for doc in documents:
-        status = "[yellow]Review[/yellow]" if doc.needs_review else "[green]Ready[/green]"
-        table.add_row(
-            doc.id[:8] + "...",
-            get_enum_value(doc.document_type),
-            doc.issuer_name[:30],
-            status,
-        )
+        tree = Tree(f"[bold blue]{tax_year}[/bold blue]")
+        for folder_name in sorted(by_folder.keys()):
+            folder_branch = tree.add(f"[bold cyan]{folder_name}[/bold cyan]")
+            for doc in by_folder[folder_name]:
+                tags_str = f" [magenta][{', '.join(doc.tags)}][/magenta]" if doc.tags else ""
+                status = "[yellow]*[/yellow]" if doc.needs_review else ""
+                folder_branch.add(
+                    f"{get_enum_value(doc.document_type)} from {doc.issuer_name} "
+                    f"[dim]({doc.id[:8]})[/dim]{tags_str}{status}"
+                )
+        console.print(tree)
+    else:
+        # Table view
+        table = Table(title=f"Tax Documents - {tax_year}")
+        table.add_column("ID", style="dim")
+        table.add_column("Type", style="cyan")
+        table.add_column("Issuer", style="white")
+        table.add_column("Tags", style="magenta")
+        table.add_column("Status", style="green")
 
-    console.print(table)
-    rprint(f"\n[dim]{len(documents)} document(s) total[/dim]")
+        for doc in documents:
+            status = "[yellow]Review[/yellow]" if doc.needs_review else "[green]Ready[/green]"
+            tags_str = ", ".join(doc.tags) if doc.tags else "-"
+            table.add_row(
+                doc.id[:8] + "...",
+                get_enum_value(doc.document_type),
+                doc.issuer_name[:30],
+                tags_str[:20],
+                status,
+            )
+        console.print(table)
+
+    # Show summary
+    all_tags = db.get_all_tags(tax_year=tax_year)
+    tags_msg = f" | Tags: {', '.join(all_tags)}" if all_tags else ""
+    rprint(f"\n[dim]{len(documents)} document(s) total{tags_msg}[/dim]")
 
 
 @documents_app.command("show")
@@ -2823,6 +2858,7 @@ def documents_show(
         table.add_row("EIN", doc.issuer_ein)
     table.add_row("Confidence", f"{doc.confidence_score:.0%}")
     table.add_row("Needs Review", "Yes" if doc.needs_review else "No")
+    table.add_row("Tags", ", ".join(doc.tags) if doc.tags else "(none)")
     table.add_row("Created", doc.created_at.strftime("%Y-%m-%d %H:%M"))
     if doc.file_path:
         table.add_row("Source File", doc.file_path)
@@ -2899,6 +2935,248 @@ def documents_delete(
         else:
             rprint(f"[red]Failed to delete document.[/red]")
             raise typer.Exit(1)
+
+
+@documents_app.command("tag")
+def documents_tag(
+    doc_id: Annotated[str, typer.Argument(help="Document ID (can be partial)")],
+    tags: Annotated[list[str], typer.Argument(help="Tags to add")],
+) -> None:
+    """Add tags to a document."""
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    db = get_database()
+
+    if db.add_tags(doc_id, tags):
+        rprint(f"[green]Added tags: {', '.join(tags)}[/green]")
+    else:
+        rprint(f"[red]Document not found: {doc_id}[/red]")
+        raise typer.Exit(1)
+
+
+@documents_app.command("untag")
+def documents_untag(
+    doc_id: Annotated[str, typer.Argument(help="Document ID (can be partial)")],
+    tags: Annotated[list[str], typer.Argument(help="Tags to remove")],
+) -> None:
+    """Remove tags from a document."""
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    db = get_database()
+
+    if db.remove_tags(doc_id, tags):
+        rprint(f"[green]Removed tags: {', '.join(tags)}[/green]")
+    else:
+        rprint(f"[red]Document not found: {doc_id}[/red]")
+        raise typer.Exit(1)
+
+
+@documents_app.command("tags")
+def documents_tags(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Filter by tax year")] = None,
+) -> None:
+    """List all tags in use."""
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    tag_counts = db.get_tag_counts(tax_year=tax_year)  # Single query for all tag counts
+
+    if not tag_counts:
+        rprint(f"[yellow]No tags in use for tax year {tax_year}.[/yellow]")
+        rprint("[dim]Add tags with: tax-agent documents tag <doc_id> <tag1> [tag2] ...[/dim]")
+        return
+
+    table = Table(title=f"Tags - {tax_year}")
+    table.add_column("Tag", style="magenta")
+    table.add_column("Documents", style="cyan")
+
+    for tag in sorted(tag_counts.keys()):
+        table.add_row(tag, str(tag_counts[tag]))
+
+    console.print(table)
+
+
+@documents_app.command("folders")
+def documents_folders(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Filter by tax year")] = None,
+) -> None:
+    """Show documents organized by folder."""
+    from rich.tree import Tree
+    from tax_agent.models.documents import group_documents_by_folder
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+
+    if not documents:
+        rprint(f"[yellow]No documents collected for tax year {tax_year}.[/yellow]")
+        return
+
+    by_folder = group_documents_by_folder(documents)
+
+    tree = Tree(f"[bold blue]{tax_year}[/bold blue]")
+    for folder_name in sorted(by_folder.keys()):
+        folder_branch = tree.add(f"[bold cyan]{folder_name}[/bold cyan]")
+        for doc in by_folder[folder_name]:
+            tags_str = f" [magenta][{', '.join(doc.tags)}][/magenta]" if doc.tags else ""
+            status = "[yellow]*[/yellow]" if doc.needs_review else ""
+            folder_branch.add(
+                f"{get_enum_value(doc.document_type)} from {doc.issuer_name} "
+                f"[dim]({doc.id[:8]})[/dim]{tags_str}{status}"
+            )
+
+    console.print(tree)
+    rprint(f"\n[dim]{len(documents)} document(s) total[/dim]")
+
+
+# Context subcommands
+@context_app.command("show")
+def context_show() -> None:
+    """Display the TAX_CONTEXT.md steering document."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+
+    if not ctx.exists():
+        rprint("[yellow]No TAX_CONTEXT.md file found.[/yellow]")
+        rprint(f"[dim]Create one with: tax-agent context create[/dim]")
+        rprint(f"[dim]Location: {ctx.context_path}[/dim]")
+        return
+
+    content = ctx.load()
+    summary = ctx.get_summary()
+    modified = summary["modified"].strftime("%Y-%m-%d %H:%M") if summary["modified"] else "unknown"
+
+    rprint(Panel.fit(f"[bold]TAX_CONTEXT.md[/bold]", subtitle=f"Modified: {modified}"))
+    rprint(f"[dim]Path: {ctx.context_path}[/dim]\n")
+    rprint(Markdown(content))
+
+
+@context_app.command("create")
+def context_create() -> None:
+    """Create a new TAX_CONTEXT.md from template."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+
+    if ctx.exists():
+        rprint(f"[yellow]TAX_CONTEXT.md already exists at {ctx.context_path}[/yellow]")
+        rprint("[dim]Use 'tax-agent context edit' to modify, or 'tax-agent context reset' to replace.[/dim]")
+        return
+
+    ctx.create_from_template()
+    rprint(f"[green]Created TAX_CONTEXT.md at {ctx.context_path}[/green]")
+    rprint("\n[dim]Edit this file to describe your tax situation.[/dim]")
+    rprint("[dim]Use 'tax-agent context edit' to open in your editor.[/dim]")
+
+
+@context_app.command("edit")
+def context_edit() -> None:
+    """Open TAX_CONTEXT.md in your default editor."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+
+    if not ctx.exists():
+        ctx.create_from_template()
+        rprint(f"[green]Created TAX_CONTEXT.md at {ctx.context_path}[/green]")
+
+    if ctx.open_in_editor():
+        rprint(f"[green]Opening {ctx.context_path} in editor...[/green]")
+    else:
+        rprint("[yellow]Could not open editor automatically.[/yellow]")
+        rprint(f"Please edit manually: {ctx.context_path}")
+        rprint("\n[dim]Tip: Set the EDITOR environment variable to specify your preferred editor.[/dim]")
+
+
+@context_app.command("reset")
+def context_reset(
+    force: Annotated[bool, typer.Option("--force", "-f", help="Skip confirmation")] = False,
+) -> None:
+    """Reset TAX_CONTEXT.md to the default template."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+
+    if ctx.exists() and not force:
+        if not Confirm.ask("[yellow]Replace existing TAX_CONTEXT.md with fresh template?[/yellow]"):
+            rprint("[dim]Cancelled.[/dim]")
+            return
+
+    ctx.create_from_template()
+    rprint(f"[green]Reset TAX_CONTEXT.md to default template.[/green]")
+
+
+@context_app.command("path")
+def context_path() -> None:
+    """Show the path to TAX_CONTEXT.md."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+    exists = "[green](exists)[/green]" if ctx.exists() else "[yellow](not created)[/yellow]"
+    rprint(f"TAX_CONTEXT.md path: {ctx.context_path} {exists}")
+
+
+@context_app.command("info")
+def context_info() -> None:
+    """Show information about the tax context file."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+    summary = ctx.get_summary()
+
+    if not summary["exists"]:
+        rprint("[yellow]TAX_CONTEXT.md does not exist.[/yellow]")
+        rprint(f"[dim]Create with: tax-agent context create[/dim]")
+        return
+
+    table = Table(title="Tax Context Info")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="white")
+
+    table.add_row("Path", str(summary["path"]))
+    table.add_row("Size", f"{summary['size']} bytes")
+    table.add_row("Sections", str(summary["sections"]))
+    table.add_row("Modified", summary["modified"].strftime("%Y-%m-%d %H:%M") if summary["modified"] else "N/A")
+    table.add_row("Has Content", "Yes" if summary["has_content"] else "No (still template)")
+
+    console.print(table)
+
+    # Show extracted info
+    info = ctx.extract_key_info()
+    if info:
+        rprint("\n[bold]Extracted Information:[/bold]")
+        for key, value in info.items():
+            if isinstance(value, list):
+                rprint(f"  [cyan]{key}:[/cyan] {', '.join(value)}")
+            else:
+                rprint(f"  [cyan]{key}:[/cyan] {value}")
 
 
 # Config subcommands

@@ -331,23 +331,91 @@ def cmd_status(args: list[str], context: dict) -> str:
 
 def cmd_documents(args: list[str], context: dict) -> str:
     """List or manage collected documents."""
+    from tax_agent.models.documents import DOCUMENT_CATEGORIES, get_document_folder
     from tax_agent.storage.database import get_database
 
     subcommand = args[0] if args else "list"
 
     if subcommand == "list":
         db = get_database()
-        docs = db.get_documents()
+
+        # Parse --tag filter
+        tag_filter = None
+        if "--tag" in args:
+            idx = args.index("--tag")
+            if idx + 1 < len(args):
+                tag_filter = [args[idx + 1]]
+
+        # Parse --folder flag for grouped view
+        show_folders = "--folder" in args or "-f" in args
+
+        docs = db.get_documents(tags=tag_filter)
 
         if not docs:
+            if tag_filter:
+                return f"No documents found with tag '{tag_filter[0]}'."
             return "No documents collected yet. Use `/collect <path>` to add documents."
+
+        if show_folders:
+            return _format_folder_tree(docs)
 
         lines = ["# Collected Documents\n"]
         for doc in docs:
             doc_type = doc.document_type
             issuer = doc.issuer_name
             year = doc.tax_year
-            lines.append(f"- **{doc_type}** from {issuer} ({year}) `{doc.id[:8]}...`")
+            tags_str = f" [{', '.join(doc.tags)}]" if doc.tags else ""
+            lines.append(f"- **{doc_type}** from {issuer} ({year}) `{doc.id[:8]}...`{tags_str}")
+
+        # Show available tags
+        all_tags = db.get_all_tags()
+        if all_tags:
+            lines.append(f"\n*Tags in use: {', '.join(all_tags)}*")
+
+        return "\n".join(lines)
+
+    elif subcommand == "folders":
+        db = get_database()
+        docs = db.get_documents()
+
+        if not docs:
+            return "No documents collected yet. Use `/collect <path>` to add documents."
+
+        return _format_folder_tree(docs)
+
+    elif subcommand == "tag":
+        if len(args) < 3:
+            return "Usage: /documents tag <document_id> <tag1> [tag2] ...\n\nExample: /documents tag abc123 work primary"
+        doc_id = args[1]
+        tags = args[2:]
+        db = get_database()
+
+        if db.add_tags(doc_id, tags):
+            return f"✓ Added tags [{', '.join(tags)}] to document `{doc_id}`"
+        return f"✗ Document not found: {doc_id}"
+
+    elif subcommand == "untag":
+        if len(args) < 3:
+            return "Usage: /documents untag <document_id> <tag1> [tag2] ...\n\nExample: /documents untag abc123 work"
+        doc_id = args[1]
+        tags = args[2:]
+        db = get_database()
+
+        if db.remove_tags(doc_id, tags):
+            return f"✓ Removed tags [{', '.join(tags)}] from document `{doc_id}`"
+        return f"✗ Document not found: {doc_id}"
+
+    elif subcommand == "tags":
+        db = get_database()
+        tag_counts = db.get_tag_counts()  # Single query for all tag counts
+
+        if not tag_counts:
+            return "No tags in use. Add tags with `/documents tag <id> <tag>`"
+
+        lines = ["# Tags in Use\n"]
+        for tag in sorted(tag_counts.keys()):
+            count = tag_counts[tag]
+            lines.append(f"- **{tag}** ({count} document{'s' if count != 1 else ''})")
 
         return "\n".join(lines)
 
@@ -437,7 +505,53 @@ def cmd_documents(args: list[str], context: dict) -> str:
         )
 
     else:
-        return f"Unknown subcommand: {subcommand}. Use 'list', 'show', 'delete', or 'purge'."
+        return (
+            f"Unknown subcommand: {subcommand}.\n\n"
+            "Available subcommands:\n"
+            "- `list` - List documents (use --folder for tree view, --tag to filter)\n"
+            "- `folders` - Show folder tree view\n"
+            "- `show <id>` - Show document details\n"
+            "- `tag <id> <tags>` - Add tags to a document\n"
+            "- `untag <id> <tags>` - Remove tags from a document\n"
+            "- `tags` - List all tags in use\n"
+            "- `delete <id>` - Delete a document\n"
+            "- `purge` - Delete all documents"
+        )
+
+
+def _format_folder_tree(docs: list) -> str:
+    """Format documents as a folder tree grouped by year and category."""
+    from tax_agent.models.documents import group_documents_by_year_and_folder
+
+    by_year = group_documents_by_year_and_folder(docs)
+    lines = ["# Document Folders\n"]
+
+    for year in sorted(by_year.keys(), reverse=True):
+        lines.append(f"## {year}")
+
+        folders = by_year[year]
+        folder_names = sorted(folders.keys())
+
+        for i, folder in enumerate(folder_names):
+            is_last_folder = i == len(folder_names) - 1
+            prefix = "└──" if is_last_folder else "├──"
+            lines.append(f"{prefix} **{folder}**")
+
+            # List documents in this folder
+            folder_docs = folders[folder]
+            for j, doc in enumerate(folder_docs):
+                is_last_doc = j == len(folder_docs) - 1
+                doc_prefix = "    └──" if is_last_doc else "    ├──"
+
+                tags_str = f" [{', '.join(doc.tags)}]" if doc.tags else ""
+                lines.append(
+                    f"{doc_prefix} {doc.document_type} from {doc.issuer_name} "
+                    f"(`{doc.id[:8]}`){tags_str}"
+                )
+
+        lines.append("")  # Blank line between years
+
+    return "\n".join(lines)
 
 
 def cmd_collect(args: list[str], context: dict) -> str:
@@ -1287,6 +1401,114 @@ def cmd_forget(args: list[str], context: dict) -> str:
         return f"✗ Failed to delete memory: {memory_id}"
 
 
+def cmd_context(args: list[str], context: dict) -> str:
+    """Manage the tax context steering document (TAX_CONTEXT.md)."""
+    from tax_agent.context import get_tax_context
+
+    ctx = get_tax_context()
+    subcommand = args[0] if args else "show"
+
+    if subcommand == "show":
+        content = ctx.load()
+        if not content:
+            return (
+                "No TAX_CONTEXT.md file found.\n\n"
+                "Create one with `/context create` to provide persistent context about your tax situation.\n"
+                f"Location: `{ctx.context_path}`"
+            )
+
+        summary = ctx.get_summary()
+        modified = summary["modified"].strftime("%Y-%m-%d %H:%M") if summary["modified"] else "unknown"
+
+        return f"""# Tax Context
+
+**File:** `{ctx.context_path}`
+**Last modified:** {modified}
+
+---
+
+{content}
+"""
+
+    elif subcommand == "create" or subcommand == "new" or subcommand == "template":
+        if ctx.exists():
+            return (
+                f"TAX_CONTEXT.md already exists at `{ctx.context_path}`\n\n"
+                "Use `/context edit` to modify it, or `/context reset` to replace with template."
+            )
+
+        content = ctx.create_from_template()
+        return f"""✓ Created TAX_CONTEXT.md at `{ctx.context_path}`
+
+The file has been populated with a template. Edit it to describe your tax situation.
+
+Use `/context edit` to open in your editor, or `/context show` to view.
+"""
+
+    elif subcommand == "edit":
+        if not ctx.exists():
+            ctx.create_from_template()
+
+        if ctx.open_in_editor():
+            return f"✓ Opening `{ctx.context_path}` in your editor..."
+        else:
+            return (
+                f"Could not open editor. Please edit manually:\n\n"
+                f"`{ctx.context_path}`\n\n"
+                "Set the EDITOR environment variable to specify your preferred editor."
+            )
+
+    elif subcommand == "reset":
+        # Check for --force flag
+        if "--force" not in args and "-f" not in args:
+            if ctx.exists():
+                return (
+                    "⚠️ This will replace your existing TAX_CONTEXT.md with a fresh template.\n\n"
+                    "To confirm, run: `/context reset --force`"
+                )
+
+        content = ctx.create_from_template()
+        return f"✓ Reset TAX_CONTEXT.md to default template at `{ctx.context_path}`"
+
+    elif subcommand == "path":
+        return f"TAX_CONTEXT.md path: `{ctx.context_path}`"
+
+    elif subcommand == "info":
+        summary = ctx.get_summary()
+        if not summary["exists"]:
+            return f"TAX_CONTEXT.md does not exist. Create with `/context create`."
+
+        info = ctx.extract_key_info()
+        lines = ["# Tax Context Info\n"]
+        lines.append(f"**Path:** `{summary['path']}`")
+        lines.append(f"**Size:** {summary['size']} bytes")
+        lines.append(f"**Sections:** {summary['sections']}")
+        lines.append(f"**Modified:** {summary['modified'].strftime('%Y-%m-%d %H:%M') if summary['modified'] else 'N/A'}")
+        lines.append(f"**Has Content:** {'Yes' if summary['has_content'] else 'No (still template)'}")
+
+        if info:
+            lines.append("\n## Extracted Info")
+            for key, value in info.items():
+                if isinstance(value, list):
+                    lines.append(f"- **{key}:** {', '.join(value)}")
+                else:
+                    lines.append(f"- **{key}:** {value}")
+
+        return "\n".join(lines)
+
+    else:
+        return (
+            f"Unknown subcommand: {subcommand}\n\n"
+            "Available commands:\n"
+            "- `/context show` - Display the context file\n"
+            "- `/context create` - Create from template\n"
+            "- `/context edit` - Open in editor\n"
+            "- `/context info` - Show context summary\n"
+            "- `/context reset` - Reset to template\n"
+            "- `/context path` - Show file path"
+        )
+
+
 # ============================================================================
 # Register all commands
 # ============================================================================
@@ -1296,7 +1518,7 @@ def _register_all_commands() -> None:
     register_command("help", "Show available commands", cmd_help, ["h", "?"], requires_init=False)
     register_command("start", "Get started - workflow guide", cmd_start, ["guide", "workflow"], requires_init=False)
     register_command("status", "Show current status", cmd_status, ["s"], requires_init=False)
-    register_command("documents", "List or manage documents", cmd_documents, ["docs", "d", "doc"], usage="[list|show|delete|purge]")
+    register_command("documents", "List or manage documents", cmd_documents, ["docs", "d", "doc"], usage="[list|folders|tag|untag|tags|show|delete|purge]")
     register_command("collect", "Collect a tax document", cmd_collect, ["c"], usage="<file_path>")
     register_command("find", "Find tax documents on your system", cmd_find, ["f"], usage="[directory]")
     register_command("analyze", "Analyze tax situation", cmd_analyze, ["a", "analyse", "analysis"])
@@ -1319,6 +1541,8 @@ def _register_all_commands() -> None:
     # Memory system
     register_command("memory", "View or manage memories", cmd_memory, ["mem", "remember"], usage="[add|clear]")
     register_command("forget", "Delete a specific memory", cmd_forget, usage="<memory_id>")
+    # Tax context steering document
+    register_command("context", "Manage tax context file", cmd_context, ["ctx"], usage="[show|create|edit|info|reset]")
 
 
 # Auto-register on import

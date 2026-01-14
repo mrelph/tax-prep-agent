@@ -145,6 +145,12 @@ class TaxDatabase:
                 CREATE INDEX IF NOT EXISTS idx_session_year ON session_state(tax_year);
             """)
 
+            # Migration: Add tags column if it doesn't exist
+            cursor = conn.execute("PRAGMA table_info(documents)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "tags" not in columns:
+                conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT DEFAULT '[]'")
+
     # Document operations
     def save_document(self, doc: TaxDocument) -> None:
         """Save a tax document to the database."""
@@ -154,8 +160,8 @@ class TaxDatabase:
                 INSERT OR REPLACE INTO documents
                 (id, tax_year, document_type, issuer_name, issuer_ein, recipient_ssn_last4,
                  raw_text, extracted_data, file_path, file_hash, confidence_score, needs_review,
-                 created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 tags, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     doc.id,
@@ -170,6 +176,7 @@ class TaxDatabase:
                     doc.file_hash,
                     doc.confidence_score,
                     1 if doc.needs_review else 0,
+                    json.dumps([t.lower() for t in doc.tags]),  # Store tags lowercase
                     doc.created_at.isoformat(),
                     doc.updated_at.isoformat(),
                 ),
@@ -191,6 +198,7 @@ class TaxDatabase:
         self,
         tax_year: int | None = None,
         document_type: DocumentType | None = None,
+        tags: list[str] | None = None,
     ) -> list[TaxDocument]:
         """Get documents with optional filtering."""
         query = "SELECT * FROM documents WHERE 1=1"
@@ -208,7 +216,14 @@ class TaxDatabase:
 
         with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
-            return [self._row_to_document(row) for row in rows]
+            docs = [self._row_to_document(row) for row in rows]
+
+            # Filter by tags in Python (SQLite JSON support is limited)
+            if tags:
+                tags_lower = [t.lower() for t in tags]
+                docs = [d for d in docs if any(t in d.tags for t in tags_lower)]
+
+            return docs
 
     def delete_document(self, doc_id: str) -> bool:
         """Delete a document by ID."""
@@ -228,8 +243,93 @@ class TaxDatabase:
                 cursor = conn.execute("DELETE FROM documents")
             return cursor.rowcount
 
+    def add_tags(self, doc_id: str, tags: list[str]) -> bool:
+        """Add tags to a document. Returns True if successful."""
+        doc = self.get_document(doc_id)
+        if doc is None:
+            # Try partial ID match
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE id LIKE ?", (f"{doc_id}%",)
+                ).fetchone()
+                if row is None:
+                    return False
+                doc = self._row_to_document(row)
+
+        # Add new tags (lowercase, no duplicates)
+        existing_tags = set(doc.tags)
+        new_tags = [t.lower() for t in tags]
+        existing_tags.update(new_tags)
+        doc.tags = sorted(existing_tags)
+        doc.updated_at = datetime.now()
+
+        self.save_document(doc)
+        return True
+
+    def remove_tags(self, doc_id: str, tags: list[str]) -> bool:
+        """Remove tags from a document. Returns True if successful."""
+        doc = self.get_document(doc_id)
+        if doc is None:
+            # Try partial ID match
+            with self._connection() as conn:
+                row = conn.execute(
+                    "SELECT * FROM documents WHERE id LIKE ?", (f"{doc_id}%",)
+                ).fetchone()
+                if row is None:
+                    return False
+                doc = self._row_to_document(row)
+
+        # Remove specified tags (case-insensitive)
+        tags_to_remove = {t.lower() for t in tags}
+        doc.tags = [t for t in doc.tags if t not in tags_to_remove]
+        doc.updated_at = datetime.now()
+
+        self.save_document(doc)
+        return True
+
+    def get_all_tags(self, tax_year: int | None = None) -> list[str]:
+        """Get all unique tags across documents (queries only tags column)."""
+        query = "SELECT tags FROM documents WHERE 1=1"
+        params: list[Any] = []
+
+        if tax_year is not None:
+            query += " AND tax_year = ?"
+            params.append(tax_year)
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            all_tags: set[str] = set()
+            for row in rows:
+                tags_json = row["tags"] if row["tags"] else "[]"
+                tags = json.loads(tags_json)
+                all_tags.update(tags)
+            return sorted(all_tags)
+
+    def get_tag_counts(self, tax_year: int | None = None) -> dict[str, int]:
+        """Get tag counts in a single query (avoids N+1 problem)."""
+        query = "SELECT tags FROM documents WHERE 1=1"
+        params: list[Any] = []
+
+        if tax_year is not None:
+            query += " AND tax_year = ?"
+            params.append(tax_year)
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            tag_counts: dict[str, int] = {}
+            for row in rows:
+                tags_json = row["tags"] if row["tags"] else "[]"
+                tags = json.loads(tags_json)
+                for tag in tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            return tag_counts
+
     def _row_to_document(self, row: Any) -> TaxDocument:
         """Convert a database row to a TaxDocument."""
+        # Handle tags column (may not exist in older databases)
+        tags_json = row["tags"] if "tags" in row.keys() else "[]"
+        tags = json.loads(tags_json) if tags_json else []
+
         return TaxDocument(
             id=row["id"],
             tax_year=row["tax_year"],
@@ -243,6 +343,7 @@ class TaxDatabase:
             file_hash=row["file_hash"],
             confidence_score=row["confidence_score"],
             needs_review=bool(row["needs_review"]),
+            tags=tags,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

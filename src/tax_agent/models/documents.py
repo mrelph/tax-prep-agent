@@ -61,6 +61,88 @@ TAX_RETURNS = {
     DocumentType.STATE_RETURN,
 }
 
+# Virtual folder categories for document organization
+DOCUMENT_CATEGORIES: dict[str, set[DocumentType]] = {
+    # Income documents
+    "Income/Employment": {DocumentType.W2, DocumentType.W2_G},
+    "Income/Investments": {
+        DocumentType.FORM_1099_INT,
+        DocumentType.FORM_1099_DIV,
+        DocumentType.FORM_1099_B,
+    },
+    "Income/Self-Employment": {
+        DocumentType.FORM_1099_NEC,
+        DocumentType.FORM_1099_MISC,
+        DocumentType.K1,
+    },
+    "Income/Retirement": {DocumentType.FORM_1099_R},
+    "Income/Government": {DocumentType.FORM_1099_G, DocumentType.FORM_1099_K},
+    # Deduction documents
+    "Deductions/Mortgage": {DocumentType.FORM_1098},
+    "Deductions/Education": {DocumentType.FORM_1098_T, DocumentType.FORM_1098_E},
+    "Deductions/Retirement": {DocumentType.FORM_5498},
+    # Tax returns
+    "Returns/Federal": {
+        DocumentType.FORM_1040,
+        DocumentType.FORM_1040_SR,
+        DocumentType.FORM_1040_NR,
+        DocumentType.FORM_1040_X,
+    },
+    "Returns/Schedules": {
+        DocumentType.SCHEDULE_A,
+        DocumentType.SCHEDULE_B,
+        DocumentType.SCHEDULE_C,
+        DocumentType.SCHEDULE_D,
+        DocumentType.SCHEDULE_E,
+        DocumentType.SCHEDULE_SE,
+    },
+    "Returns/State": {DocumentType.STATE_RETURN},
+}
+
+
+def get_document_folder(doc_type: DocumentType | str) -> str:
+    """Get the virtual folder path for a document type."""
+    if isinstance(doc_type, str):
+        try:
+            doc_type = DocumentType(doc_type)
+        except ValueError:
+            return "Other"
+
+    for folder, types in DOCUMENT_CATEGORIES.items():
+        if doc_type in types:
+            return folder
+    return "Other"
+
+
+def group_documents_by_folder(
+    docs: list["TaxDocument"],
+) -> dict[str, list["TaxDocument"]]:
+    """Group documents by their virtual folder category."""
+    by_folder: dict[str, list[TaxDocument]] = {}
+    for doc in docs:
+        folder = get_document_folder(doc.document_type)
+        if folder not in by_folder:
+            by_folder[folder] = []
+        by_folder[folder].append(doc)
+    return by_folder
+
+
+def group_documents_by_year_and_folder(
+    docs: list["TaxDocument"],
+) -> dict[int, dict[str, list["TaxDocument"]]]:
+    """Group documents by year, then by folder category."""
+    by_year: dict[int, dict[str, list[TaxDocument]]] = {}
+    for doc in docs:
+        year = doc.tax_year
+        folder = get_document_folder(doc.document_type)
+
+        if year not in by_year:
+            by_year[year] = {}
+        if folder not in by_year[year]:
+            by_year[year][folder] = []
+        by_year[year][folder].append(doc)
+    return by_year
+
 
 class TaxDocument(BaseModel):
     """Represents a tax document collected from the user."""
@@ -84,6 +166,9 @@ class TaxDocument(BaseModel):
     )
     needs_review: bool = Field(
         default=False, description="Flag indicating if manual review is needed"
+    )
+    tags: list[str] = Field(
+        default_factory=list, description="User-defined tags for document organization"
     )
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

@@ -26,6 +26,10 @@ Comprehensive documentation for the Tax Prep Agent - an AI-powered conversationa
 |------|---------------|
 | First-time setup | [README: Installation](../README.md#installation) → [USAGE: Getting Started](USAGE.md#getting-started) |
 | Collect documents | [USAGE: collect command](USAGE.md#tax-agent-collect-file) |
+| Organize documents | [USAGE: Document Organization](USAGE.md#document-management) |
+| Tag documents | [USAGE: Tag commands](USAGE.md#tax-agent-documents-tag) |
+| View folder tree | [USAGE: Folders view](USAGE.md#tax-agent-documents-folders) |
+| Set up tax context | [USAGE: Tax Context](USAGE.md#tax-context-management) |
 | Analyze taxes | [USAGE: analyze command](USAGE.md#tax-agent-analyze) |
 | Find deductions | [USAGE: optimize command](USAGE.md#tax-agent-optimize) |
 | Review return | [USAGE: review command](USAGE.md#tax-agent-review-return-file) |
@@ -236,6 +240,10 @@ tax-agent status
 | **Specialized Subagents** | [USAGE: Example Session](USAGE.md#interactive-mode-recommended) | [API: Subagents](API.md#subagents-module) |
 | **Safety Hooks** | [README: Architecture](../README.md#architecture-highlights) | [API: Hooks](API.md#safety-hooks-module) |
 | Document Collection | [USAGE: collect](USAGE.md#tax-agent-collect-file) | [API: DocumentCollector](API.md#documentcollector) |
+| **Document Organization** | [USAGE: Document Management](USAGE.md#document-management) | [API: Documents Model](API.md#documents-model) |
+| **Document Tagging** | [USAGE: Tag Commands](USAGE.md#tax-agent-documents-tag) | [API: Database Tags](API.md#database-operations) |
+| **Folder Views** | [USAGE: Folders](USAGE.md#tax-agent-documents-folders) | [API: Document Grouping](API.md#document-organization) |
+| **Tax Context** | [USAGE: Tax Context](USAGE.md#tax-context-management) | [API: TaxContext](API.md#tax-context-module) |
 | OCR Processing | [README: Features](../README.md#document-collection--processing) | [API: OCR](API.md#tax_agentcollectorsocr) |
 | Tax Analysis | [USAGE: analyze](USAGE.md#tax-agent-analyze) | [API: TaxAnalyzer](API.md#taxanalyzer) |
 | Optimization | [USAGE: optimize](USAGE.md#tax-agent-optimize) | [API: TaxOptimizer](API.md#taxoptimizer) |
