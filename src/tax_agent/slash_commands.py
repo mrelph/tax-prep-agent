@@ -194,6 +194,7 @@ def cmd_help(args: list[str], context: dict) -> str:
         "Documents": ["documents", "collect", "find"],
         "Analysis": ["analyze", "optimize", "chat"],
         "AI Features": ["subagent", "subagents", "validate", "audit", "plan", "review"],
+        "Google Drive": ["drive"],
         "Configuration": ["config", "year", "state"],
     }
 
@@ -682,6 +683,184 @@ def cmd_chat(args: list[str], context: dict) -> str:
 
 
 # ============================================================================
+# Google Drive Commands
+# ============================================================================
+
+def cmd_drive(args: list[str], context: dict) -> str:
+    """Google Drive integration commands."""
+    from tax_agent.config import get_config
+
+    config = get_config()
+
+    if not args:
+        # Show Drive status and help
+        is_configured = config.has_google_drive_configured()
+
+        if is_configured:
+            return (
+                "# Google Drive Integration\n\n"
+                "**Status:** ✓ Connected\n\n"
+                "## Commands\n"
+                "- `/drive list` - List folders in your Drive\n"
+                "- `/drive files <folder_id>` - List files in a folder\n"
+                "- `/drive collect <folder_id>` - Import documents from a folder\n"
+                "- `/drive auth --revoke` - Disconnect from Google Drive\n"
+            )
+        else:
+            return (
+                "# Google Drive Integration\n\n"
+                "**Status:** ✗ Not connected\n\n"
+                "## Setup Instructions\n"
+                "1. Create a Google Cloud project at https://console.cloud.google.com\n"
+                "2. Enable the Google Drive API\n"
+                "3. Create OAuth credentials (Desktop app type)\n"
+                "4. Download the credentials JSON file\n"
+                "5. Run: `tax-agent drive auth --setup <path-to-credentials.json>`\n\n"
+                "See docs/GOOGLE_DRIVE_SETUP.md for detailed instructions."
+            )
+
+    subcommand = args[0].lower()
+
+    if subcommand == "list":
+        return _drive_list_folders(args[1:])
+    elif subcommand == "files":
+        return _drive_list_files(args[1:])
+    elif subcommand == "collect":
+        return _drive_collect(args[1:])
+    elif subcommand == "auth":
+        return _drive_auth(args[1:])
+    else:
+        return f"✗ Unknown drive subcommand: {subcommand}\n\nUse `/drive` for help."
+
+
+def _drive_auth(args: list[str]) -> str:
+    """Handle drive auth subcommand."""
+    from tax_agent.config import get_config
+
+    config = get_config()
+
+    if "--revoke" in args or "-r" in args:
+        config.clear_google_credentials()
+        return "✓ Google Drive credentials have been removed."
+
+    # Check if already authenticated
+    if config.has_google_drive_configured():
+        return (
+            "✓ Already connected to Google Drive.\n\n"
+            "To re-authenticate, run: `tax-agent drive auth`\n"
+            "To disconnect, use: `/drive auth --revoke`"
+        )
+
+    return (
+        "To connect Google Drive, run this command in your terminal:\n\n"
+        "```\ntax-agent drive auth --setup <path-to-credentials.json>\n```\n\n"
+        "This will open a browser for authorization."
+    )
+
+
+def _drive_list_folders(args: list[str]) -> str:
+    """List folders in Google Drive."""
+    from tax_agent.config import get_config
+
+    config = get_config()
+    if not config.has_google_drive_configured():
+        return "✗ Google Drive not connected. Use `/drive` for setup instructions."
+
+    try:
+        from tax_agent.collectors.google_drive import GoogleDriveCollector
+
+        collector = GoogleDriveCollector()
+        if not collector.is_authenticated():
+            return "✗ Google Drive authentication expired. Run: `tax-agent drive auth`"
+
+        parent_id = args[0] if args else "root"
+        folders = collector.list_folders(parent_id)
+
+        if not folders:
+            return "No folders found."
+
+        lines = ["# Google Drive Folders\n"]
+        for folder in folders:
+            lines.append(f"- **{folder.name}** `{folder.id}`")
+
+        lines.append(f"\n[dim]Use `/drive files <folder_id>` to see files in a folder[/dim]")
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"✗ Error listing folders: {e}"
+
+
+def _drive_list_files(args: list[str]) -> str:
+    """List files in a Google Drive folder."""
+    if not args:
+        return "Usage: `/drive files <folder_id>`\n\nUse `/drive list` to find folder IDs."
+
+    from tax_agent.config import get_config
+
+    config = get_config()
+    if not config.has_google_drive_configured():
+        return "✗ Google Drive not connected. Use `/drive` for setup instructions."
+
+    try:
+        from tax_agent.collectors.google_drive import GoogleDriveCollector
+
+        collector = GoogleDriveCollector()
+        if not collector.is_authenticated():
+            return "✗ Google Drive authentication expired. Run: `tax-agent drive auth`"
+
+        folder_id = args[0]
+        files = collector.list_files(folder_id)
+
+        if not files:
+            return "No supported files found in this folder."
+
+        lines = ["# Files in Folder\n"]
+        for f in files:
+            file_type = "Google Doc" if f.is_google_doc else f.mime_type.split("/")[-1].upper()
+            lines.append(f"- **{f.name}** ({file_type}) `{f.id}`")
+
+        lines.append(f"\n[dim]Use `/drive collect {folder_id}` to import these documents[/dim]")
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"✗ Error listing files: {e}"
+
+
+def _drive_collect(args: list[str]) -> str:
+    """Collect documents from a Google Drive folder."""
+    if not args:
+        return (
+            "Usage: `/drive collect <folder_id> [--year YEAR]`\n\n"
+            "Use `/drive list` to find folder IDs."
+        )
+
+    from tax_agent.config import get_config
+
+    config = get_config()
+    if not config.has_google_drive_configured():
+        return "✗ Google Drive not connected. Use `/drive` for setup instructions."
+
+    folder_id = args[0]
+
+    # Parse --year option
+    year = None
+    if "--year" in args:
+        idx = args.index("--year")
+        if idx + 1 < len(args):
+            try:
+                year = int(args[idx + 1])
+            except ValueError:
+                return f"✗ Invalid year: {args[idx + 1]}"
+
+    return (
+        f"[Collecting documents from Google Drive folder: {folder_id}]\n\n"
+        f"For full progress output, run in terminal:\n"
+        f"```\ntax-agent drive collect {folder_id}"
+        f"{f' --year {year}' if year else ''}\n```"
+    )
+
+
+# ============================================================================
 # Register all commands
 # ============================================================================
 
@@ -704,6 +883,8 @@ def _register_all_commands() -> None:
     register_command("year", "Set or show tax year", cmd_year, usage="[YEAR]")
     register_command("state", "Set or show state", cmd_state, usage="[STATE]")
     register_command("chat", "Interactive tax chat", cmd_chat, usage="<question>")
+    # Google Drive integration
+    register_command("drive", "Google Drive integration", cmd_drive, ["gdrive"], usage="[list|files|collect|auth]")
 
 
 # Auto-register on import
