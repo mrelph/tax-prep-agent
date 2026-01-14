@@ -49,121 +49,105 @@ A CLI-powered tax document collection, analysis, and optimization tool that uses
 
 ## Installation
 
-### Prerequisites
-- Python 3.11 or higher
-- Tesseract OCR (for document scanning)
-- Poppler (for PDF processing)
+### Quick Install (Recommended)
 
-### Install System Dependencies
+**One-liner install:**
+```bash
+curl -sSL https://raw.githubusercontent.com/mrelph/tax-prep-agent/main/install.sh | bash
+```
 
-**macOS** (using Homebrew):
+This automatically:
+- Detects your Python version
+- Uses pipx if available (recommended) or creates a virtual environment
+- Sets up the `tax-agent` command
+
+**Or with pipx (if you have it):**
+```bash
+pipx install git+https://github.com/mrelph/tax-prep-agent.git
+```
+
+**Or with pip:**
+```bash
+pip install git+https://github.com/mrelph/tax-prep-agent.git
+```
+
+### System Dependencies
+
+You'll need Tesseract OCR and Poppler for document processing:
+
+**macOS:**
 ```bash
 brew install tesseract poppler
 ```
 
-**Ubuntu/Debian**:
+**Ubuntu/Debian:**
 ```bash
-sudo apt-get update
 sudo apt-get install tesseract-ocr poppler-utils
 ```
 
-**Windows**:
-1. Download and install [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
-2. Download and install [Poppler](https://blog.alivate.com.au/poppler-windows/)
-3. Add both to your system PATH
+**Windows:**
+1. Install [Tesseract](https://github.com/UB-Mannheim/tesseract/wiki)
+2. Install [Poppler](https://blog.alivate.com.au/poppler-windows/)
+3. Add both to your PATH
 
-### Install Tax Prep Agent
+### Verify Installation
 
-**Install from source**:
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd tax-prep-agent
-
-# Install with pip
-pip install -e .
-
-# Or install with development dependencies
-pip install -e ".[dev]"
-```
-
-**Verify installation**:
-```bash
-tax-agent --help
+tax-agent --version
 ```
 
 ## Quick Start
 
-### 1. Initialize the Agent
-
-Set up encrypted storage and configure your API key:
+### 1. Initialize and Start
 
 ```bash
+# First-time setup
 tax-agent init
+
+# Then just run:
+tax-agent
 ```
 
-You'll be prompted for:
-- **Encryption password**: Protects your tax data (choose a strong password)
-- **Anthropic API key**: Your Claude API key (get one at [console.anthropic.com](https://console.anthropic.com))
+This starts interactive mode where you can:
+- Ask questions about your taxes
+- Use `/help` to see all commands
+- Use `/collect <file>` to add documents
+- Use `/analyze` to analyze your situation
+- Tab-complete slash commands
 
-Your data will be stored in `~/.tax-agent/data/` with encryption enabled.
-
-### 2. Configure Basic Settings
-
-```bash
-# Set your state (for state tax considerations)
-tax-agent config set state CA
-
-# Set tax year (defaults to 2024)
-tax-agent config set tax_year 2024
-
-# Set filing status
-tax-agent config set filing_status single
-```
-
-### 3. Collect Tax Documents
-
-Process a single document:
-```bash
-tax-agent collect ~/Documents/taxes/w2_2024.pdf
-```
-
-Process an entire directory:
-```bash
-tax-agent collect ~/Documents/taxes/ --dir
-```
-
-The agent will:
-1. Extract text using OCR (for images) or PDF parsing
-2. Classify the document type using AI
-3. Extract structured data from the document
-4. Store everything securely in the encrypted database
-5. Flag any documents that need manual review
-
-### 4. Analyze Your Tax Situation
+### 2. Or Use Direct Commands
 
 ```bash
+# Collect documents
+tax-agent collect ~/taxes/w2.pdf
+tax-agent collect ~/taxes/ --dir
+
+# Analyze your situation
 tax-agent analyze
-```
 
-Get a comprehensive analysis including:
-- Total income by source
-- Tax withholding summary
-- Estimated tax liability
-- Refund or amount owed projection
-- AI-powered insights and recommendations
-
-### 5. Find Tax Optimization Opportunities
-
-```bash
+# Find deductions
 tax-agent optimize
+
+# Review a completed return
+tax-agent ai review-return ~/taxes/1040.pdf
 ```
 
-Run an interactive interview to identify:
-- Deductions you qualify for
-- Tax credits you may have missed
-- Strategies for stock compensation
-- Planning opportunities for next year
+### Interactive Mode Commands
+
+When running `tax-agent` (interactive mode), these slash commands are available:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/status` | View current status |
+| `/documents` | List collected documents |
+| `/collect <file>` | Add a document |
+| `/analyze` | Run tax analysis |
+| `/optimize` | Find deductions |
+| `/subagents` | List AI specialists |
+| `/config` | View/change settings |
+
+Or just type a question like "What deductions am I missing?"
 
 ## CLI Command Reference
 
