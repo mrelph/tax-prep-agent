@@ -244,6 +244,21 @@ def cmd_status(args: list[str], context: dict) -> str:
         doc_count = len(docs)
         lines.append(f"- **Documents Collected:** {doc_count}")
 
+        # Show document years breakdown if multiple years
+        if doc_count > 0:
+            years = {}
+            for doc in docs:
+                y = doc.tax_year
+                years[y] = years.get(y, 0) + 1
+
+            if len(years) == 1:
+                year = list(years.keys())[0]
+                if year != config.tax_year:
+                    lines.append(f"- **Document Year:** {year} ⚠️ (config set to {config.tax_year})")
+            elif len(years) > 1:
+                year_summary = ", ".join(f"{y}: {c}" for y, c in sorted(years.items()))
+                lines.append(f"- **Document Years:** {year_summary}")
+
         # Empty state guidance
         if doc_count == 0:
             lines.append("\n## Get Started\n")
@@ -357,6 +372,10 @@ def cmd_collect(args: list[str], context: dict) -> str:
         return f"✗ File not found: {file_path}\n\n**Tip:** Use `/find` to search for tax documents"
 
     from tax_agent.collectors.document_classifier import get_document_collector
+    from tax_agent.config import get_config
+
+    config = get_config()
+    config_year = config.tax_year
 
     collector = get_document_collector()
     result = collector.process_file(file_path, tax_year=year)
@@ -365,12 +384,23 @@ def cmd_collect(args: list[str], context: dict) -> str:
         return f"✗ Error processing file: {result}"
 
     doc = result
+
+    # Check if document year differs from config year
+    year_notice = ""
+    if doc.tax_year != config_year:
+        year_notice = (
+            f"\n\n**Note:** Document is for tax year {doc.tax_year}, "
+            f"but your config is set to {config_year}.\n"
+            f"Update with: `/year {doc.tax_year}`"
+        )
+
     return (
         f"# ✓ Document Collected\n\n"
         f"- **Type:** {doc.document_type}\n"
         f"- **Issuer:** {doc.issuer_name}\n"
         f"- **Tax Year:** {doc.tax_year}\n"
-        f"- **Confidence:** {doc.confidence:.0%}\n\n"
+        f"- **Confidence:** {doc.confidence:.0%}"
+        f"{year_notice}\n\n"
         f"**Next:** `/analyze` to see tax implications or `/collect` to add more documents"
     )
 
