@@ -398,8 +398,46 @@ def cmd_documents(args: list[str], context: dict) -> str:
             f"To confirm, run: `/documents delete {doc_id} --force`"
         )
 
+    elif subcommand == "purge":
+        db = get_database()
+        docs = db.get_documents()
+        count = len(docs)
+
+        if count == 0:
+            return "No documents to purge."
+
+        # Parse --year option for selective purge
+        year = None
+        if "--year" in args:
+            idx = args.index("--year")
+            if idx + 1 < len(args):
+                try:
+                    year = int(args[idx + 1])
+                    # Recount for specific year
+                    docs = db.get_documents(tax_year=year)
+                    count = len(docs)
+                    if count == 0:
+                        return f"No documents found for tax year {year}."
+                except ValueError:
+                    return f"✗ Invalid year: {args[idx + 1]}"
+
+        # Check for --force flag to skip confirmation
+        if "--force" in args or "-f" in args:
+            deleted = db.clear_documents(tax_year=year)
+            year_msg = f" for {year}" if year else ""
+            return f"✓ Purged {deleted} document(s){year_msg}"
+
+        # Show confirmation prompt
+        year_msg = f" for tax year {year}" if year else ""
+        confirm_cmd = f"/documents purge{f' --year {year}' if year else ''} --force"
+        return (
+            f"⚠️ **Confirm purge**\n\n"
+            f"This will delete **{count} document(s)**{year_msg}.\n\n"
+            f"To confirm, run: `{confirm_cmd}`"
+        )
+
     else:
-        return f"Unknown subcommand: {subcommand}. Use 'list', 'show', or 'delete'."
+        return f"Unknown subcommand: {subcommand}. Use 'list', 'show', 'delete', or 'purge'."
 
 
 def cmd_collect(args: list[str], context: dict) -> str:
@@ -1239,7 +1277,7 @@ def _register_all_commands() -> None:
     register_command("help", "Show available commands", cmd_help, ["h", "?"], requires_init=False)
     register_command("start", "Get started - workflow guide", cmd_start, ["guide", "workflow"], requires_init=False)
     register_command("status", "Show current status", cmd_status, ["s"], requires_init=False)
-    register_command("documents", "List or manage documents", cmd_documents, ["docs", "d", "doc"], usage="[list|show|delete]")
+    register_command("documents", "List or manage documents", cmd_documents, ["docs", "d", "doc"], usage="[list|show|delete|purge]")
     register_command("collect", "Collect a tax document", cmd_collect, ["c"], usage="<file_path>")
     register_command("find", "Find tax documents on your system", cmd_find, ["f"], usage="[directory]")
     register_command("analyze", "Analyze tax situation", cmd_analyze, ["a", "analyse", "analysis"])

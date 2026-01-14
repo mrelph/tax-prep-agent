@@ -216,6 +216,18 @@ class TaxDatabase:
             cursor = conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
             return cursor.rowcount > 0
 
+    def clear_documents(self, tax_year: int | None = None) -> int:
+        """Delete all documents, optionally filtered by tax year. Returns count deleted."""
+        with self._connection() as conn:
+            if tax_year:
+                cursor = conn.execute(
+                    "DELETE FROM documents WHERE tax_year = ?",
+                    (tax_year,)
+                )
+            else:
+                cursor = conn.execute("DELETE FROM documents")
+            return cursor.rowcount
+
     def _row_to_document(self, row: Any) -> TaxDocument:
         """Convert a database row to a TaxDocument."""
         return TaxDocument(
