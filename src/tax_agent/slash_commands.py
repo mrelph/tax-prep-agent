@@ -728,32 +728,35 @@ def cmd_review(args: list[str], context: dict) -> str:
         mode_notice = "_Switched to REVIEW mode_\n\n" if was_different_mode else ""
         lines = [f"{mode_notice}# ✓ Tax Return Review Complete\n"]
         lines.append(f"**Tax Year:** {review_result.return_summary.tax_year}")
-        lines.append(f"**Documents Checked:** {len(review_result.source_documents_checked)}")
-        lines.append(f"**Findings:** {len(review_result.findings)}\n")
+        lines.append(f"**Source Documents:** {len(review_result.source_documents_checked)} checked")
+        lines.append(f"**Assessment:** {review_result.overall_assessment}\n")
 
+        # Show the full analysis from Claude Vision
+        if reviewer._last_review_text:
+            lines.append("---\n")
+            lines.append("## Detailed Analysis\n")
+            lines.append(reviewer._last_review_text)
+            lines.append("\n---\n")
+
+        # Summary of structured findings
         if review_result.findings:
-            # Group by severity
             errors = [f for f in review_result.findings if f.severity.value == "error"]
             warnings = [f for f in review_result.findings if f.severity.value == "warning"]
             suggestions = [f for f in review_result.findings if f.severity.value == "suggestion"]
 
+            lines.append("## Summary\n")
             if errors:
-                lines.append("## Errors (must fix)\n")
-                for f in errors:
-                    impact = f" (${f.potential_impact:,.0f})" if f.potential_impact else ""
-                    lines.append(f"- **{f.title}**: {f.description}{impact}")
-
+                lines.append(f"- **{len(errors)} Error(s)** - Must fix before filing")
             if warnings:
-                lines.append("\n## Warnings (should verify)\n")
-                for f in warnings:
-                    lines.append(f"- **{f.title}**: {f.description}")
-
+                lines.append(f"- **{len(warnings)} Warning(s)** - Should verify")
             if suggestions:
-                lines.append("\n## Suggestions\n")
-                for f in suggestions[:5]:  # Limit to 5
-                    lines.append(f"- {f.description}")
-        else:
-            lines.append("**No issues found!** Your return looks good.")
+                lines.append(f"- **{len(suggestions)} Suggestion(s)** - Optimization opportunities")
+
+        lines.append("\n---")
+        lines.append("_Ask me questions about these findings! For example:_")
+        lines.append("- \"What should I fix first?\"")
+        lines.append("- \"Is an amendment worth it?\"")
+        lines.append("- \"Explain the [specific issue] in more detail\"")
 
         return "\n".join(lines)
 
