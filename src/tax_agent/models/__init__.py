@@ -2,6 +2,7 @@
 
 from tax_agent.models.documents import DocumentType, TaxDocument
 from tax_agent.models.memory import Memory, MemoryCategory, MemoryType
+from tax_agent.models.mode import AgentMode, ModeState, MODE_INFO
 from tax_agent.models.taxpayer import FilingStatus, TaxpayerProfile
 
 __all__ = [
@@ -12,4 +13,7 @@ __all__ = [
     "Memory",
     "MemoryType",
     "MemoryCategory",
+    "AgentMode",
+    "ModeState",
+    "MODE_INFO",
 ]

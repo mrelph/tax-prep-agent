@@ -7,8 +7,64 @@ from typing import AsyncIterator
 from tax_agent.agent import get_agent
 from tax_agent.config import get_config
 from tax_agent.models.documents import TaxDocument
+from tax_agent.models.mode import AgentMode, MODE_INFO
+from tax_agent.session import SessionManager
 from tax_agent.storage.database import get_database
 from tax_agent.utils import get_enum_value
+
+
+# Mode-specific system prompt additions
+MODE_PROMPTS = {
+    AgentMode.PREP: """You are helping prepare a tax return for the upcoming filing.
+
+PREP MODE FOCUS:
+- Collect ALL relevant tax documents (W-2s, 1099s, receipts, etc.)
+- Find every possible deduction and credit
+- Maximize the refund or minimize taxes owed
+- Ensure nothing is missed before filing
+- Proactively ask about commonly missed items
+
+PROACTIVE QUESTIONS TO CONSIDER:
+- Have they donated to charity?
+- Do they have student loan interest?
+- Did they pay for childcare?
+- Any medical expenses over 7.5% of AGI?
+- Home office if self-employed?
+- Education credits (AOTC, LLC)?""",
+
+    AgentMode.REVIEW: """You are reviewing a completed tax return for errors and opportunities.
+
+REVIEW MODE FOCUS:
+- Find errors, miscalculations, and inconsistencies
+- Identify missed deductions and credits
+- Check if amounts match source documents
+- Determine if an amendment would be worthwhile
+- Calculate potential additional refund vs amendment cost (~$50)
+
+KEY CHECKS:
+- Do wages match all W-2 Box 1 totals?
+- Is interest/dividend income complete?
+- Were all Schedule D transactions reported?
+- Any missed credits (EIC, child tax credit, etc.)?
+- State return consistent with federal?""",
+
+    AgentMode.PLANNING: """You are a tax planning strategist for long-term optimization.
+
+PLANNING MODE FOCUS:
+- Multi-year tax optimization strategies
+- Retirement planning (Roth conversions, 401k optimization, RMDs)
+- Scenario analysis ("What if I...")
+- Life event planning (marriage, kids, home purchase)
+- Investment tax strategies
+
+STRATEGIC CONSIDERATIONS:
+- Current vs future tax bracket comparison
+- Timing of income and deductions
+- Asset location (tax-advantaged vs taxable)
+- Estate planning implications
+- State tax considerations for moves""",
+}
+
 
 
 class TaxAdvisorChat:
@@ -30,6 +86,7 @@ class TaxAdvisorChat:
         self._agent = None  # Lazy initialization
         self._sdk_agent = None  # Lazy initialization
         self.db = get_database()
+        self.session = SessionManager(self.db, self.tax_year)
         self.conversation_history: list[dict] = []
         self._source_dir: Path | None = None
 
@@ -54,10 +111,13 @@ class TaxAdvisorChat:
         return self.config.use_agent_sdk and self.sdk_agent is not None
 
     def _build_context(self) -> str:
-        """Build context from collected documents, profile, and memories."""
+        """Build context from collected documents, profile, memories, and mode."""
         documents = self.db.get_documents(tax_year=self.tax_year)
+        mode = self.session.current_mode
+        mode_info = MODE_INFO[mode]
 
         context_parts = [
+            f"CURRENT MODE: {mode_info['name']} - {mode_info['description']}",
             f"TAX YEAR: {self.tax_year}",
             f"STATE: {self.state or 'Not specified'}",
             "",
@@ -117,11 +177,25 @@ class TaxAdvisorChat:
         if user_message.strip().startswith("/"):
             return self._handle_slash_command(user_message)
 
+        # Check for mode auto-detection and switch
+        mode_switched = self.session.maybe_switch_mode(user_message)
+        switch_msg = self.session.pop_switch_message()
+
         # Use SDK if available and enabled
         if self._use_sdk():
-            return self._chat_with_sdk(user_message)
+            response = self._chat_with_sdk(user_message)
+        else:
+            response = self._chat_with_legacy(user_message)
 
-        return self._chat_with_legacy(user_message)
+        # Prepend mode switch message if mode changed
+        if switch_msg:
+            response = f"{switch_msg}\n\n---\n\n{response}"
+
+        # Save conversation to session state
+        self.session.add_message("user", user_message)
+        self.session.add_message("assistant", response)
+
+        return response
 
     def _handle_slash_command(self, user_message: str) -> str:
         """Handle a slash command within the chat interface."""
@@ -146,8 +220,12 @@ class TaxAdvisorChat:
     def _chat_with_legacy(self, user_message: str) -> str:
         """Chat using the legacy agent (direct Anthropic SDK)."""
         context = self._build_context()
+        mode = self.session.current_mode
+        mode_prompt = MODE_PROMPTS.get(mode, "")
 
         system = f"""You are an expert tax advisor having a conversation with a taxpayer.
+
+{mode_prompt}
 
 TAXPAYER CONTEXT:
 {context}
@@ -398,6 +476,23 @@ Provide a helpful, specific response. Be AGGRESSIVE about finding tax savings op
     def reset(self) -> None:
         """Reset conversation history."""
         self.conversation_history = []
+
+    def get_current_mode(self) -> AgentMode:
+        """Get the current operating mode."""
+        return self.session.current_mode
+
+    def get_mode_info(self) -> dict:
+        """Get display info for current mode."""
+        return self.session.mode_info
+
+    def switch_mode(self, mode: AgentMode) -> str:
+        """Explicitly switch to a different mode."""
+        self.session.switch_mode(mode)
+        return self.session.pop_switch_message() or f"Switched to {mode.value} mode"
+
+    def save_session(self) -> None:
+        """Save current session state."""
+        self.session.save_state()
 
 
 def start_chat_session(tax_year: int | None = None) -> TaxAdvisorChat:

@@ -10,6 +10,7 @@ from typing import Any, Generator
 from tax_agent.config import get_config
 from tax_agent.models.documents import DocumentType, TaxDocument
 from tax_agent.models.memory import Memory, MemoryCategory, MemoryType
+from tax_agent.models.mode import AgentMode, ModeState
 from tax_agent.models.taxpayer import TaxpayerProfile
 
 
@@ -129,6 +130,19 @@ class TaxDatabase:
                 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
                 CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
                 CREATE INDEX IF NOT EXISTS idx_memories_year ON memories(tax_year);
+
+                CREATE TABLE IF NOT EXISTS session_state (
+                    id TEXT PRIMARY KEY,
+                    mode TEXT NOT NULL,
+                    tax_year INTEGER NOT NULL,
+                    context_data TEXT NOT NULL DEFAULT '{}',
+                    conversation_history TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_session_mode ON session_state(mode);
+                CREATE INDEX IF NOT EXISTS idx_session_year ON session_state(tax_year);
             """)
 
     # Document operations
@@ -454,6 +468,87 @@ class TaxDatabase:
             tax_year=row["tax_year"],
             confidence=row["confidence"],
             source=row["source"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    # Session state operations
+    def save_session_state(self, state: ModeState) -> str:
+        """Save session state to the database. Returns the state ID."""
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO session_state
+                (id, mode, tax_year, context_data, conversation_history,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    state.id,
+                    state.mode.value,
+                    state.tax_year,
+                    json.dumps(state.context_data),
+                    json.dumps(state.conversation_history),
+                    state.created_at.isoformat(),
+                    state.updated_at.isoformat(),
+                ),
+            )
+        return state.id
+
+    def get_session_state(self, mode: AgentMode, tax_year: int) -> ModeState | None:
+        """Get session state for a specific mode and tax year."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM session_state WHERE mode = ? AND tax_year = ?",
+                (mode.value, tax_year)
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return self._row_to_session_state(row)
+
+    def get_all_session_states(self, tax_year: int | None = None) -> list[ModeState]:
+        """Get all session states, optionally filtered by tax year."""
+        with self._connection() as conn:
+            if tax_year:
+                rows = conn.execute(
+                    "SELECT * FROM session_state WHERE tax_year = ? ORDER BY updated_at DESC",
+                    (tax_year,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM session_state ORDER BY updated_at DESC"
+                ).fetchall()
+
+            return [self._row_to_session_state(row) for row in rows]
+
+    def delete_session_state(self, state_id: str) -> bool:
+        """Delete a session state by ID."""
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM session_state WHERE id = ?", (state_id,))
+            return cursor.rowcount > 0
+
+    def clear_session_states(self, mode: AgentMode | None = None) -> int:
+        """Clear session states. Optionally filter by mode."""
+        with self._connection() as conn:
+            if mode:
+                cursor = conn.execute(
+                    "DELETE FROM session_state WHERE mode = ?",
+                    (mode.value,)
+                )
+            else:
+                cursor = conn.execute("DELETE FROM session_state")
+            return cursor.rowcount
+
+    def _row_to_session_state(self, row: Any) -> ModeState:
+        """Convert a database row to a ModeState."""
+        return ModeState(
+            id=row["id"],
+            mode=AgentMode(row["mode"]),
+            tax_year=row["tax_year"],
+            context_data=json.loads(row["context_data"]),
+            conversation_history=json.loads(row["conversation_history"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

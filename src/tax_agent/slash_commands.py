@@ -183,44 +183,48 @@ async def execute_slash_command(
 # ============================================================================
 
 def cmd_start(args: list[str], context: dict) -> str:
-    """Guide users through the two main workflows."""
+    """Guide users through the three main workflows."""
     from tax_agent.storage.database import get_database
     from tax_agent.config import get_config
+    from tax_agent.session import get_session_manager
 
     config = get_config()
     db = get_database()
     docs = db.get_documents()
+    session = get_session_manager()
 
-    lines = ["# Tax Agent - Getting Started\n"]
-    lines.append("I can help you with **two main workflows**:\n")
+    lines = ["# Tax Agent - Choose Your Task\n"]
 
-    lines.append("## 1. Prepare a New Tax Return\n")
-    lines.append("Collect your tax documents and I'll analyze your situation.\n")
+    lines.append("## 1. Prepare a Tax Return (`/prep`)\n")
+    lines.append("Upload documents, analyze, find deductions\n")
     lines.append("```")
-    lines.append("/collect ~/Documents/W2.pdf     # Add your W2")
-    lines.append("/collect ~/Documents/1099.pdf   # Add 1099s")
-    lines.append("/documents                       # See what's collected")
-    lines.append("/analyze                         # Get tax analysis")
-    lines.append("/optimize                        # Find missed deductions")
+    lines.append("/collect ~/Documents/W2.pdf   # Add documents")
+    lines.append("/analyze                       # Get analysis")
+    lines.append("/optimize                      # Find deductions")
     lines.append("```\n")
 
-    lines.append("## 2. Review a Completed Return\n")
-    lines.append("Have a completed tax return? I'll check it for errors.\n")
+    lines.append("## 2. Review a Filed Return (`/review <file>`)\n")
+    lines.append("Check for errors, missed deductions, amendments\n")
     lines.append("```")
     lines.append("/review ~/Documents/2024_1040.pdf")
     lines.append("```\n")
 
+    lines.append("## 3. Tax Planning (`/planning`)\n")
+    lines.append("Retirement, scenarios, long-term strategy\n")
+    lines.append("```")
+    lines.append("What if I convert to Roth?")
+    lines.append("How can I reduce taxes next year?")
+    lines.append("```\n")
+
     # Show current state
     lines.append("---\n")
-    lines.append("## Your Current Status\n")
-    lines.append(f"- **Tax Year:** {config.tax_year}")
-    lines.append(f"- **State:** {config.state or 'Not set'}")
-    lines.append(f"- **Documents:** {len(docs)} collected")
+    mode_info = session.mode_info
+    lines.append(f"**Current Mode:** {mode_info['name']} - {mode_info['description']}")
+    lines.append(f"**Tax Year:** {config.tax_year} | **State:** {config.state or 'Not set'}")
+    lines.append(f"**Documents:** {len(docs)} collected\n")
 
-    if not docs:
-        lines.append("\n**Next step:** Use `/collect` to add your first document, or `/review` to check a completed return.")
-    else:
-        lines.append("\n**Next step:** Use `/analyze` for a full analysis, or just ask me a question!")
+    lines.append("Type a command or describe what you want to do.")
+    lines.append("Use `/mode` to see your current mode or switch modes.")
 
     return "\n".join(lines)
 
@@ -236,9 +240,10 @@ def cmd_help(args: list[str], context: dict) -> str:
     # Group by category
     categories = {
         "General": ["help", "status", "start"],
+        "Modes": ["mode", "prep", "review", "planning"],
         "Documents": ["documents", "collect", "find"],
         "Analysis": ["analyze", "optimize", "chat"],
-        "AI Features": ["subagent", "subagents", "validate", "audit", "plan", "review"],
+        "AI Features": ["subagent", "subagents", "validate", "audit"],
         "Google Drive": ["drive"],
         "Memory": ["memory", "forget"],
         "Configuration": ["config", "year", "state"],
@@ -611,8 +616,31 @@ def cmd_plan(args: list[str], context: dict) -> str:
 
 def cmd_review(args: list[str], context: dict) -> str:
     """Review a completed tax return."""
+    from tax_agent.session import get_session_manager
+    from tax_agent.models.mode import AgentMode
+
+    # Switch to REVIEW mode
+    session = get_session_manager()
+    was_different_mode = session.current_mode != AgentMode.REVIEW
+    session.switch_mode(AgentMode.REVIEW, silent=True)
+
     if not args:
-        return "Usage: /review <return_file_path>\n\nExample: /review ~/Documents/2024_1040.pdf"
+        lines = [
+            "# ✓ REVIEW Mode\n",
+            "_Reviewing completed tax returns_\n",
+            "## Usage",
+            "```",
+            "/review ~/Documents/2024_1040.pdf",
+            "/review ~/Documents/return.pdf --year 2023",
+            "```\n",
+            "## What I'll Check",
+            "- Errors and miscalculations",
+            "- Missed deductions and credits",
+            "- Amounts vs source documents",
+            "- Amendment opportunities\n",
+            "Provide a tax return file to begin review."
+        ]
+        return "\n".join(lines)
 
     file_path = Path(args[0]).expanduser()
 
@@ -638,8 +666,13 @@ def cmd_review(args: list[str], context: dict) -> str:
         reviewer = ReturnReviewer(year)
         review_result = reviewer.review_return(file_path)
 
+        # Save review context to session
+        session.update_context("return_file", str(file_path))
+        session.update_context("findings_count", len(review_result.findings))
+
         # Build response
-        lines = [f"# ✓ Tax Return Review Complete\n"]
+        mode_notice = "_Switched to REVIEW mode_\n\n" if was_different_mode else ""
+        lines = [f"{mode_notice}# ✓ Tax Return Review Complete\n"]
         lines.append(f"**Tax Year:** {review_result.return_summary.tax_year}")
         lines.append(f"**Documents Checked:** {len(review_result.source_documents_checked)}")
         lines.append(f"**Findings:** {len(review_result.findings)}\n")
@@ -989,6 +1022,104 @@ def _drive_collect(args: list[str]) -> str:
 
 
 # ============================================================================
+# Mode Commands
+# ============================================================================
+
+def cmd_mode(args: list[str], context: dict) -> str:
+    """Switch or show current operating mode."""
+    from tax_agent.session import get_session_manager
+    from tax_agent.models.mode import AgentMode, MODE_INFO
+
+    session = get_session_manager()
+
+    if not args:
+        # Show current mode
+        return session.get_mode_summary()
+
+    mode_arg = args[0].lower()
+
+    mode_map = {
+        "prep": AgentMode.PREP,
+        "review": AgentMode.REVIEW,
+        "planning": AgentMode.PLANNING,
+        "plan": AgentMode.PLANNING,  # Alias
+    }
+
+    if mode_arg not in mode_map:
+        modes_list = ", ".join(mode_map.keys())
+        return f"✗ Unknown mode: {mode_arg}\n\nAvailable modes: {modes_list}"
+
+    mode = mode_map[mode_arg]
+    session.switch_mode(mode)
+    msg = session.pop_switch_message()
+
+    return f"✓ {msg}" if msg else f"✓ Switched to {mode.value} mode"
+
+
+def cmd_prep(args: list[str], context: dict) -> str:
+    """Enter PREP mode for preparing a new tax return."""
+    from tax_agent.session import get_session_manager
+    from tax_agent.models.mode import AgentMode
+    from tax_agent.storage.database import get_database
+
+    session = get_session_manager()
+    session.switch_mode(AgentMode.PREP)
+
+    db = get_database()
+    docs = db.get_documents()
+    doc_count = len(docs)
+
+    lines = [
+        "# ✓ PREP Mode\n",
+        "_Preparing a new tax return_\n",
+        "## Focus",
+        "- Collect ALL relevant tax documents",
+        "- Find every possible deduction and credit",
+        "- Maximize your refund or minimize taxes owed\n",
+        "## Commands",
+        "- `/collect <file>` - Add a tax document",
+        "- `/find [dir]` - Search for documents",
+        "- `/analyze` - Analyze your tax situation",
+        "- `/optimize` - Find missed deductions\n",
+    ]
+
+    if doc_count > 0:
+        lines.append(f"**Documents collected:** {doc_count}")
+        lines.append("\n**Next step:** `/analyze` to see your tax situation")
+    else:
+        lines.append("**Next step:** `/collect` to add your first document")
+
+    return "\n".join(lines)
+
+
+def cmd_planning(args: list[str], context: dict) -> str:
+    """Enter PLANNING mode for long-term tax strategy."""
+    from tax_agent.session import get_session_manager
+    from tax_agent.models.mode import AgentMode
+
+    session = get_session_manager()
+    session.switch_mode(AgentMode.PLANNING)
+
+    lines = [
+        "# ✓ PLANNING Mode\n",
+        "_Long-term tax planning and strategy_\n",
+        "## Focus",
+        "- Multi-year tax optimization",
+        "- Retirement planning (Roth conversions, 401k, RMDs)",
+        "- Scenario analysis (\"What if I...\")",
+        "- Life event planning\n",
+        "## Example Questions",
+        "- \"What if I max out my 401k?\"",
+        "- \"Should I convert to Roth IRA?\"",
+        "- \"What's the tax impact of selling my RSUs?\"",
+        "- \"How can I reduce taxes if I'm retiring next year?\"\n",
+        "**Just ask** any tax planning question!"
+    ]
+
+    return "\n".join(lines)
+
+
+# ============================================================================
 # Memory Commands
 # ============================================================================
 
@@ -1117,12 +1248,15 @@ def _register_all_commands() -> None:
     register_command("subagent", "Invoke a specialized subagent", cmd_subagent, usage="<name> <prompt>")
     register_command("validate", "Cross-validate documents", cmd_validate, ["v"])
     register_command("audit", "Assess audit risk", cmd_audit, usage="[--thorough]")
-    register_command("plan", "Tax planning recommendations", cmd_plan, usage="[--year YEAR]")
-    register_command("review", "Review a tax return", cmd_review, usage="<return_file>")
+    register_command("review", "Review a tax return", cmd_review, usage="[return_file]")
     register_command("config", "View or change settings", cmd_config, ["cfg", "settings"], usage="[get|set] [key] [value]")
     register_command("year", "Set or show tax year", cmd_year, usage="[YEAR]")
     register_command("state", "Set or show state", cmd_state, usage="[STATE]")
     register_command("chat", "Interactive tax chat", cmd_chat, usage="<question>")
+    # Mode commands
+    register_command("mode", "Show or switch operating mode", cmd_mode, usage="[prep|review|planning]")
+    register_command("prep", "Enter PREP mode", cmd_prep, requires_init=False)
+    register_command("planning", "Enter PLANNING mode", cmd_planning, ["plan"], requires_init=False)
     # Google Drive integration
     register_command("drive", "Google Drive integration", cmd_drive, ["gdrive"], usage="[list|files|collect|auth]")
     # Memory system

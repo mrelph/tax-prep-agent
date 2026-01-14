@@ -460,14 +460,28 @@ def _start_interactive_mode() -> None:
 
         # Bottom toolbar showing status (like Claude Code)
         def get_toolbar():
+            from tax_agent.session import get_session_manager
+            from tax_agent.models.mode import MODE_INFO
+
             doc_count = get_doc_count()
             state = config.state or "—"
-            mode = "SDK" if config.use_agent_sdk else "Legacy"
+
+            # Get current agent mode with color
+            try:
+                session_mgr = get_session_manager(tax_year)
+                agent_mode = session_mgr.current_mode
+                mode_info = MODE_INFO[agent_mode]
+                mode_name = mode_info["name"]
+                mode_color = mode_info["color"]
+            except Exception:
+                mode_name = "PREP"
+                mode_color = "#4CAF50"
+
             return HTML(
-                f'<b>Tax Year:</b> {tax_year} │ '
+                f'<style bg="{mode_color}" fg="white"> {mode_name} </style> │ '
+                f'<b>Year:</b> {tax_year} │ '
                 f'<b>State:</b> {state} │ '
                 f'<b>Docs:</b> {doc_count} │ '
-                f'<b>Mode:</b> {mode} │ '
                 f'<style bg="#333355"> /help </style>'
             )
 
