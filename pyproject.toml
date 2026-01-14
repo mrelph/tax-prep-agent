@@ -40,6 +40,7 @@ dependencies = [
     "google-auth-oauthlib>=1.2.0",  # For Google OAuth flow
     "google-api-python-client>=2.118.0",  # For Google Drive API
     "fpdf2>=2.7.0",  # For PDF report generation
+    "prompt_toolkit>=3.0.0",  # For interactive mode with autocomplete
 ]
 
 [project.optional-dependencies]

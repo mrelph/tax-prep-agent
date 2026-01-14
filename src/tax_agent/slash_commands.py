@@ -73,6 +73,39 @@ def list_commands() -> list[SlashCommand]:
     return sorted(result, key=lambda c: c.name)
 
 
+def get_completions(partial: str) -> list[str]:
+    """
+    Get command completions for partial input.
+
+    Args:
+        partial: Partial command text (with or without leading /)
+
+    Returns:
+        List of matching command names with /
+    """
+    text = partial.lstrip("/").lower()
+    completions = []
+
+    for cmd in list_commands():
+        if cmd.name.lower().startswith(text):
+            completions.append(f"/{cmd.name}")
+        for alias in cmd.aliases:
+            if alias.lower().startswith(text) and f"/{alias}" not in completions:
+                completions.append(f"/{alias}")
+
+    return sorted(completions)
+
+
+def get_all_command_names() -> list[str]:
+    """Get all command names including aliases, prefixed with /."""
+    names = set()
+    for cmd in list_commands():
+        names.add(f"/{cmd.name}")
+        for alias in cmd.aliases:
+            names.add(f"/{alias}")
+    return sorted(names)
+
+
 def parse_slash_command(input_text: str) -> tuple[str | None, list[str]]:
     """
     Parse a slash command from input text.
@@ -176,35 +209,36 @@ def cmd_status(args: list[str], context: dict) -> str:
 
     # Show document count
     try:
-        from tax_agent.storage import get_storage
-        storage = get_storage()
-        docs = storage.list_documents()
+        from tax_agent.storage.database import get_database
+        db = get_database()
+        docs = db.get_documents()
         lines.append(f"- **Documents Collected:** {len(docs)}")
     except Exception:
-        pass
+        lines.append(f"- **Documents Collected:** (unavailable)")
+
 
     return "\n".join(lines)
 
 
 def cmd_documents(args: list[str], context: dict) -> str:
     """List or manage collected documents."""
-    from tax_agent.storage import get_storage
+    from tax_agent.storage.database import get_database
 
     subcommand = args[0] if args else "list"
 
     if subcommand == "list":
-        storage = get_storage()
-        docs = storage.list_documents()
+        db = get_database()
+        docs = db.get_documents()
 
         if not docs:
             return "No documents collected yet. Use `/collect <path>` to add documents."
 
         lines = ["# Collected Documents\n"]
         for doc in docs:
-            doc_type = doc.get("document_type", "UNKNOWN")
-            issuer = doc.get("issuer_name", "Unknown")
-            year = doc.get("tax_year", "?")
-            lines.append(f"- **{doc_type}** from {issuer} ({year})")
+            doc_type = doc.document_type
+            issuer = doc.issuer_name
+            year = doc.tax_year
+            lines.append(f"- **{doc_type}** from {issuer} ({year}) `{doc.id[:8]}...`")
 
         return "\n".join(lines)
 
@@ -212,21 +246,31 @@ def cmd_documents(args: list[str], context: dict) -> str:
         if len(args) < 2:
             return "Usage: /documents show <document_id>"
         doc_id = args[1]
-        storage = get_storage()
-        doc = storage.get_document(doc_id)
+        db = get_database()
+        doc = db.get_document(doc_id)
         if not doc:
             return f"Document not found: {doc_id}"
 
-        import json
-        return f"# Document Details\n\n```json\n{json.dumps(doc, indent=2, default=str)}\n```"
+        return f"""# Document Details
+
+- **ID:** {doc.id}
+- **Type:** {doc.document_type}
+- **Issuer:** {doc.issuer_name}
+- **Tax Year:** {doc.tax_year}
+- **Confidence:** {doc.confidence_score:.0%}
+- **Needs Review:** {'Yes' if doc.needs_review else 'No'}
+- **File:** {doc.file_path or 'N/A'}
+"""
 
     elif subcommand == "delete":
         if len(args) < 2:
             return "Usage: /documents delete <document_id>"
         doc_id = args[1]
-        storage = get_storage()
-        storage.delete_document(doc_id)
-        return f"Document deleted: {doc_id}"
+        db = get_database()
+        if db.delete_document(doc_id):
+            return f"Document deleted: {doc_id}"
+        else:
+            return f"Document not found: {doc_id}"
 
     else:
         return f"Unknown subcommand: {subcommand}. Use 'list', 'show', or 'delete'."
@@ -273,13 +317,13 @@ def cmd_collect(args: list[str], context: dict) -> str:
 def cmd_analyze(args: list[str], context: dict) -> str:
     """Analyze tax situation based on collected documents."""
     from tax_agent.agent_compat import get_compatible_agent
-    from tax_agent.storage import get_storage
+    from tax_agent.storage.database import get_database
     from tax_agent.profile import get_profile
 
-    storage = get_storage()
+    storage = get_database()
     profile = get_profile()
 
-    docs = storage.list_documents()
+    docs = storage.get_documents()
     if not docs:
         return "No documents collected. Use `/collect <path>` to add tax documents first."
 
@@ -311,10 +355,10 @@ def cmd_analyze(args: list[str], context: dict) -> str:
 def cmd_optimize(args: list[str], context: dict) -> str:
     """Find deduction and credit optimization opportunities."""
     from tax_agent.agent_compat import get_compatible_agent
-    from tax_agent.storage import get_storage
+    from tax_agent.storage.database import get_database
 
-    storage = get_storage()
-    docs = storage.list_documents()
+    storage = get_database()
+    docs = storage.get_documents()
 
     if not docs:
         return "No documents collected. Use `/collect <path>` to add tax documents first."
@@ -374,10 +418,10 @@ def cmd_subagent(args: list[str], context: dict) -> str:
 def cmd_validate(args: list[str], context: dict) -> str:
     """Cross-validate collected documents."""
     from tax_agent.agent_compat import get_compatible_agent
-    from tax_agent.storage import get_storage
+    from tax_agent.storage.database import get_database
 
-    storage = get_storage()
-    docs = storage.list_documents()
+    storage = get_database()
+    docs = storage.get_documents()
 
     if len(docs) < 2:
         return "Need at least 2 documents for cross-validation."
@@ -392,10 +436,10 @@ def cmd_validate(args: list[str], context: dict) -> str:
 def cmd_audit(args: list[str], context: dict) -> str:
     """Assess audit risk based on tax data."""
     from tax_agent.agent_compat import get_compatible_agent
-    from tax_agent.storage import get_storage
+    from tax_agent.storage.database import get_database
 
-    storage = get_storage()
-    docs = storage.list_documents()
+    storage = get_database()
+    docs = storage.get_documents()
 
     if not docs:
         return "No documents collected for audit risk assessment."
@@ -412,12 +456,12 @@ def cmd_audit(args: list[str], context: dict) -> str:
 def cmd_plan(args: list[str], context: dict) -> str:
     """Generate tax planning recommendations."""
     from tax_agent.agent_compat import get_compatible_agent
-    from tax_agent.storage import get_storage
+    from tax_agent.storage.database import get_database
     from tax_agent.profile import get_profile
 
-    storage = get_storage()
+    storage = get_database()
     profile = get_profile()
-    docs = storage.list_documents()
+    docs = storage.get_documents()
 
     if not docs:
         return "No documents collected for tax planning."

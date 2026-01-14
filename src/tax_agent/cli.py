@@ -356,6 +356,7 @@ def main(
 def _start_interactive_mode() -> None:
     """Start the interactive Agent SDK mode."""
     from tax_agent.chat import TaxAdvisorChat
+    from tax_agent.slash_commands import get_all_command_names
 
     config = get_config()
 
@@ -381,7 +382,7 @@ def _start_interactive_mode() -> None:
         f"Tax Year: {tax_year}\n"
         f"State: {config.state or 'Not set'}\n"
         f"Mode: {sdk_status}\n\n"
-        "[bold]Commands:[/bold]\n"
+        "[bold]Commands:[/bold] (Tab to autocomplete)\n"
         "  /help     - Show all slash commands\n"
         "  /status   - View current status\n"
         "  /analyze  - Run tax analysis\n"
@@ -399,10 +400,46 @@ def _start_interactive_mode() -> None:
             rprint(f"  [cyan]• {s}[/cyan]")
     rprint("")
 
+    # Set up prompt with autocomplete
+    try:
+        from prompt_toolkit import prompt as pt_prompt
+        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.styles import Style
+
+        # Create completer with slash commands
+        command_completer = WordCompleter(
+            get_all_command_names(),
+            ignore_case=True,
+            match_middle=False,
+        )
+
+        style = Style.from_dict({
+            'prompt': 'ansigreen bold',
+        })
+
+        def get_input():
+            return pt_prompt(
+                "> ",
+                completer=command_completer,
+                style=style,
+                complete_while_typing=True,
+            )
+
+        has_autocomplete = True
+    except ImportError:
+        # Fall back to basic input if prompt_toolkit not available
+        has_autocomplete = False
+
+        def get_input():
+            return Prompt.ask("\n[bold green]>[/bold green]")
+
+    if has_autocomplete:
+        rprint("[dim]Tip: Press Tab for command autocomplete[/dim]\n")
+
     # Main interaction loop
     while True:
         try:
-            user_input = Prompt.ask("\n[bold green]>[/bold green]")
+            user_input = get_input()
         except (KeyboardInterrupt, EOFError):
             rprint("\n[dim]Goodbye![/dim]")
             break
