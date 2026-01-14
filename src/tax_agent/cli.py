@@ -422,8 +422,8 @@ def _start_interactive_mode() -> None:
                 "> ",
                 completer=command_completer,
                 style=style,
-                complete_while_typing=False,  # Only complete on Tab
-                complete_style=CompleteStyle.READLINE_LIKE,  # Inline completion like bash
+                complete_while_typing=True,  # Show completions as you type
+                complete_style=CompleteStyle.MULTI_COLUMN,  # Horizontal list, not dropdown
             )
 
         has_autocomplete = True
@@ -435,7 +435,7 @@ def _start_interactive_mode() -> None:
             return Prompt.ask("\n[bold green]>[/bold green]")
 
     if has_autocomplete:
-        rprint("[dim]Tip: Type / then Tab for inline completion[/dim]\n")
+        rprint("[dim]Tip: Type / for command suggestions[/dim]\n")
 
     # Main interaction loop
     while True:
