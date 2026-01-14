@@ -188,6 +188,322 @@ Only respond with the JSON object, no other text."""
                 "reasoning": "Failed to parse classification response",
             }
 
+    def classify_document_with_vision(self, file_path: str) -> dict:
+        """
+        Classify a tax document using Claude Vision directly on the image/PDF.
+
+        This is more accurate than OCR + text classification as Claude can
+        see the document layout, logos, and form structure.
+
+        Args:
+            file_path: Path to the PDF or image file
+
+        Returns:
+            Dictionary with document classification
+        """
+        from pathlib import Path
+        import base64
+
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        # Convert PDF to image if needed
+        images_data = self._prepare_images_for_vision(file_path)
+
+        system = """You are a tax document classifier with vision capabilities. Analyze the document image and identify what type of tax document it is.
+
+DOCUMENT CATEGORIES:
+
+SOURCE DOCUMENTS (used to prepare tax returns):
+- W2: Wage and Tax Statement from employer
+- W2_G: Gambling winnings
+- 1099_INT: Interest income from banks/investments
+- 1099_DIV: Dividend income
+- 1099_B: Brokerage/stock sale transactions
+- 1099_NEC: Non-employee compensation (freelance/contract)
+- 1099_MISC: Miscellaneous income
+- 1099_R: Retirement distributions (401k, IRA, pension)
+- 1099_G: Government payments (unemployment, state tax refunds)
+- 1099_K: Payment card/third-party network transactions
+- 1098: Mortgage interest statement
+- 1098_T: Tuition statement
+- 1098_E: Student loan interest
+- 5498: IRA contribution information
+- K1: Partnership/S-corp income (Schedule K-1)
+
+COMPLETED TAX RETURNS (for review/verification):
+- 1040: Federal individual income tax return (Form 1040)
+- 1040_SR: Federal return for seniors
+- 1040_NR: Non-resident alien return
+- 1040_X: Amended federal return
+- SCHEDULE_A: Itemized deductions
+- SCHEDULE_B: Interest and ordinary dividends
+- SCHEDULE_C: Profit or loss from business
+- SCHEDULE_D: Capital gains and losses
+- SCHEDULE_E: Supplemental income (rental, royalty, S-corp)
+- SCHEDULE_SE: Self-employment tax
+- STATE_RETURN: State income tax return (any state)
+
+Use UNKNOWN only if the document doesn't match any category above.
+
+Respond with a JSON object containing:
+- document_type: One of the types listed above
+- document_category: Either "SOURCE" or "RETURN" (or "UNKNOWN")
+- confidence: A number from 0 to 1 indicating your confidence
+- issuer_name: The name of the entity that issued this document
+- tax_year: The tax year this document is for (e.g., 2024)
+- reasoning: Brief explanation of why you classified it this way
+
+Only respond with the JSON object, no other text."""
+
+        # Build message with image(s)
+        content = []
+        for img_data in images_data[:3]:  # Limit to first 3 pages
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img_data["media_type"],
+                    "data": img_data["data"],
+                },
+            })
+        content.append({
+            "type": "text",
+            "text": "Classify this tax document based on the image(s) above.",
+        })
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=1000,
+            system=system,
+            messages=[{"role": "user", "content": content}],
+        )
+
+        # Parse JSON response
+        import json
+        try:
+            result = response.content[0].text.strip()
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+            return json.loads(result)
+        except json.JSONDecodeError:
+            return {
+                "document_type": "UNKNOWN",
+                "confidence": 0.0,
+                "issuer_name": "Unknown",
+                "tax_year": None,
+                "reasoning": "Failed to parse classification response",
+            }
+
+    def extract_data_with_vision(self, doc_type: str, file_path: str) -> dict:
+        """
+        Extract structured data from a tax document using Claude Vision.
+
+        Args:
+            doc_type: Type of document (W2, 1099_INT, etc.)
+            file_path: Path to the PDF or image file
+
+        Returns:
+            Dictionary with extracted data
+        """
+        from pathlib import Path
+
+        file_path = Path(file_path)
+        images_data = self._prepare_images_for_vision(file_path)
+
+        # Get extraction prompt for this document type
+        extraction_prompt = self._get_extraction_prompt(doc_type)
+
+        # Build message with image(s)
+        content = []
+        for img_data in images_data[:5]:  # Allow more pages for extraction
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img_data["media_type"],
+                    "data": img_data["data"],
+                },
+            })
+        content.append({
+            "type": "text",
+            "text": f"Extract all data from this {doc_type} form. Return ONLY a JSON object.",
+        })
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=4000,
+            system=extraction_prompt,
+            messages=[{"role": "user", "content": content}],
+        )
+
+        # Parse JSON response
+        import json
+        try:
+            result = response.content[0].text.strip()
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+            return json.loads(result)
+        except json.JSONDecodeError:
+            return {}
+
+    def _prepare_images_for_vision(self, file_path) -> list[dict]:
+        """
+        Prepare image data for Claude Vision API.
+
+        Handles PDFs by converting pages to images.
+
+        Args:
+            file_path: Path to file
+
+        Returns:
+            List of dicts with 'data' (base64) and 'media_type'
+        """
+        from pathlib import Path
+        import base64
+
+        file_path = Path(file_path)
+        suffix = file_path.suffix.lower()
+        images_data = []
+
+        if suffix == ".pdf":
+            # Convert PDF pages to images
+            try:
+                from tax_agent.collectors.pdf_parser import PDFParser
+                parser = PDFParser(file_path)
+                page_images = parser.render_all_pages_as_images(dpi=150)  # Lower DPI for Vision
+
+                for img_bytes in page_images:
+                    images_data.append({
+                        "data": base64.standard_b64encode(img_bytes).decode("utf-8"),
+                        "media_type": "image/png",
+                    })
+            except Exception as e:
+                raise ValueError(f"Failed to convert PDF to images: {e}")
+        else:
+            # Direct image file
+            media_types = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }
+            media_type = media_types.get(suffix, "image/png")
+
+            with open(file_path, "rb") as f:
+                images_data.append({
+                    "data": base64.standard_b64encode(f.read()).decode("utf-8"),
+                    "media_type": media_type,
+                })
+
+        return images_data
+
+    def _get_extraction_prompt(self, doc_type: str) -> str:
+        """Get the extraction system prompt for a document type."""
+        prompts = {
+            "W2": """You are a tax document data extractor. Extract ALL data from this W-2 form.
+
+Return a JSON object with these fields:
+- employer_name: Name of the employer
+- employer_ein: Employer EIN (XX-XXXXXXX format)
+- employer_address: Full employer address
+- employee_ssn_last4: Last 4 digits of employee SSN only
+- employee_name: Employee name
+- box_1: Wages, tips, other compensation (number)
+- box_2: Federal income tax withheld (number)
+- box_3: Social security wages (number)
+- box_4: Social security tax withheld (number)
+- box_5: Medicare wages and tips (number)
+- box_6: Medicare tax withheld (number)
+- box_7: Social security tips (number or null)
+- box_10: Dependent care benefits (number or null)
+- box_12_codes: Array of box 12 codes and amounts
+- box_13_statutory: Boolean for statutory employee
+- box_13_retirement: Boolean for retirement plan
+- box_13_sick_pay: Boolean for third-party sick pay
+- box_15_state: State abbreviation
+- box_16: State wages (number)
+- box_17: State income tax (number)
+- box_18: Local wages (number or null)
+- box_19: Local income tax (number or null)
+- box_20: Locality name (string or null)
+
+Use null for any field not visible. Only output the JSON object.""",
+
+            "1099_INT": """You are a tax document data extractor. Extract ALL data from this 1099-INT form.
+
+Return a JSON object with:
+- payer_name: Name of the payer (bank, institution)
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- box_1: Interest income (number)
+- box_2: Early withdrawal penalty (number or null)
+- box_3: Interest on US Savings Bonds (number or null)
+- box_4: Federal income tax withheld (number or null)
+- box_8: Tax-exempt interest (number or null)
+- state: State abbreviation if present
+- state_tax_withheld: State tax withheld (number or null)
+
+Use null for any field not visible. Only output the JSON object.""",
+
+            "1099_DIV": """You are a tax document data extractor. Extract ALL data from this 1099-DIV form.
+
+Return a JSON object with:
+- payer_name: Name of the payer
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- box_1a: Total ordinary dividends (number)
+- box_1b: Qualified dividends (number)
+- box_2a: Total capital gain distributions (number or null)
+- box_2b: Unrecap. Sec. 1250 gain (number or null)
+- box_3: Nondividend distributions (number or null)
+- box_4: Federal income tax withheld (number or null)
+- box_5: Section 199A dividends (number or null)
+- box_6: Investment expenses (number or null)
+- box_7: Foreign tax paid (number or null)
+- state: State abbreviation if present
+- state_tax_withheld: State tax withheld (number or null)
+
+Use null for any field not visible. Only output the JSON object.""",
+
+            "1099_B": """You are a tax document data extractor. Extract ALL data from this 1099-B form.
+
+Return a JSON object with:
+- payer_name: Name of the broker/payer
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- transactions: Array of transactions, each with:
+  - description: Security description
+  - date_acquired: Date acquired (or "Various")
+  - date_sold: Date sold
+  - proceeds: Gross proceeds (number)
+  - cost_basis: Cost or other basis (number or null)
+  - wash_sale_loss: Wash sale loss disallowed (number or null)
+  - short_term: Boolean (true if short-term, false if long-term)
+  - basis_reported_to_irs: Boolean
+- summary:
+  - total_proceeds: Sum of all proceeds
+  - total_cost_basis: Sum of all cost basis (if reported)
+  - short_term_proceeds: Short-term total
+  - long_term_proceeds: Long-term total
+
+Use null for any field not visible. Only output the JSON object.""",
+        }
+
+        return prompts.get(doc_type, f"""You are a tax document data extractor. Extract ALL visible data from this {doc_type} form.
+
+Return a JSON object with all fields you can identify. Use null for missing values.
+Only output the JSON object.""")
+
     def extract_w2_data(self, text: str) -> dict:
         """Extract structured data from a W-2 form."""
         system = """You are a tax document data extractor specializing in W-2 forms.

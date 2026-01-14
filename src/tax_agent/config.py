@@ -60,6 +60,7 @@ class Config:
             "aws_region": "us-east-1",
             "ocr_engine": "pytesseract",
             "auto_redact_ssn": True,
+            "use_vision": True,  # Use Claude Vision for document processing (vs OCR)
             "initialized": False,
             # Agent SDK settings (SDK is the primary interface)
             "use_agent_sdk": True,  # SDK is primary, set False for legacy mode

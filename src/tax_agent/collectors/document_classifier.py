@@ -136,9 +136,6 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
 
         tax_year = tax_year or self.config.tax_year
 
-        # Extract text from the document
-        raw_text = extract_text_with_ocr(file_path)
-
         # Compute file hash for deduplication
         file_hash = hash_file(str(file_path))
 
@@ -156,59 +153,105 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
                         f"Use --replace to update it."
                     )
 
-        # Optionally redact sensitive data before sending to AI
-        text_for_analysis = raw_text
-        if self.config.get("auto_redact_ssn", True):
-            text_for_analysis = redact_sensitive_data(raw_text)
+        # Check if we should use Vision API (default) or OCR
+        use_vision = self.config.get("use_vision", True)
 
-        # Classify the document using Claude (SDK or legacy)
-        if self._use_sdk():
-            classification = self._classify_with_sdk(text_for_analysis, file_path)
+        if use_vision:
+            # Use Claude Vision for classification and extraction
+            classification = self.agent.classify_document_with_vision(str(file_path))
+
+            doc_type_str = classification.get("document_type", "UNKNOWN")
+            try:
+                doc_type = DocumentType(doc_type_str)
+            except ValueError:
+                doc_type = DocumentType.UNKNOWN
+
+            # Check if this is a tax return - suggest /review instead
+            from tax_agent.models.documents import TAX_RETURNS
+            if doc_type in TAX_RETURNS:
+                doc_type_display = get_enum_value(doc_type)
+                tax_year_hint = classification.get("tax_year", "")
+                year_str = f" ({tax_year_hint})" if tax_year_hint else ""
+                raise ValueError(
+                    f"This looks like a completed tax return ({doc_type_display}{year_str}).\n\n"
+                    f"Use `/review {file_path}` to check it for errors instead.\n\n"
+                    f"The `/collect` command is for source documents like W2s and 1099s."
+                )
+
+            # Extract data using vision if it's a known type
+            if doc_type != DocumentType.UNKNOWN:
+                extracted_data = self.agent.extract_data_with_vision(
+                    get_enum_value(doc_type), str(file_path)
+                )
+            else:
+                extracted_data = {}
+
+            # Also get raw text for storage (using OCR as fallback)
+            try:
+                raw_text = extract_text_with_ocr(file_path)
+            except Exception:
+                raw_text = f"[Vision-processed document: {doc_type_str}]"
+
+            # Vision-based confidence
+            confidence = classification.get("confidence", 0.0)
+            needs_review = confidence < 0.8 or doc_type == DocumentType.UNKNOWN
+
         else:
-            classification = self.agent.classify_document(text_for_analysis)
+            # Legacy OCR-based processing
+            raw_text = extract_text_with_ocr(file_path)
 
-        doc_type_str = classification.get("document_type", "UNKNOWN")
-        try:
-            doc_type = DocumentType(doc_type_str)
-        except ValueError:
-            doc_type = DocumentType.UNKNOWN
+            # Optionally redact sensitive data before sending to AI
+            text_for_analysis = raw_text
+            if self.config.get("auto_redact_ssn", True):
+                text_for_analysis = redact_sensitive_data(raw_text)
 
-        # Check if this is a tax return - suggest /review instead
-        from tax_agent.models.documents import TAX_RETURNS
-        if doc_type in TAX_RETURNS:
-            doc_type_display = get_enum_value(doc_type)
-            tax_year_hint = classification.get("tax_year", "")
-            year_str = f" ({tax_year_hint})" if tax_year_hint else ""
-            raise ValueError(
-                f"This looks like a completed tax return ({doc_type_display}{year_str}).\n\n"
-                f"Use `/review {file_path}` to check it for errors instead.\n\n"
-                f"The `/collect` command is for source documents like W2s and 1099s."
+            # Classify the document using Claude (SDK or legacy)
+            if self._use_sdk():
+                classification = self._classify_with_sdk(text_for_analysis, file_path)
+            else:
+                classification = self.agent.classify_document(text_for_analysis)
+
+            doc_type_str = classification.get("document_type", "UNKNOWN")
+            try:
+                doc_type = DocumentType(doc_type_str)
+            except ValueError:
+                doc_type = DocumentType.UNKNOWN
+
+            # Check if this is a tax return - suggest /review instead
+            from tax_agent.models.documents import TAX_RETURNS
+            if doc_type in TAX_RETURNS:
+                doc_type_display = get_enum_value(doc_type)
+                tax_year_hint = classification.get("tax_year", "")
+                year_str = f" ({tax_year_hint})" if tax_year_hint else ""
+                raise ValueError(
+                    f"This looks like a completed tax return ({doc_type_display}{year_str}).\n\n"
+                    f"Use `/review {file_path}` to check it for errors instead.\n\n"
+                    f"The `/collect` command is for source documents like W2s and 1099s."
+                )
+
+            # Extract structured data based on document type
+            extracted_data = self._extract_data(doc_type, text_for_analysis)
+
+            # Verify extracted data against source document
+            from tax_agent.verification import verify_extraction
+            verification = verify_extraction(get_enum_value(doc_type), extracted_data, raw_text)
+
+            # Combine confidence scores
+            classification_conf = classification.get("confidence", 0.0)
+            verification_conf = verification.get("confidence", 1.0)
+            confidence = (classification_conf + verification_conf) / 2
+
+            needs_review = (
+                classification.get("confidence", 0.0) < 0.8
+                or doc_type == DocumentType.UNKNOWN
+                or not verification.get("verified", True)
+                or verification.get("confidence", 1.0) < 0.7
             )
-
-        # Extract structured data based on document type
-        extracted_data = self._extract_data(doc_type, text_for_analysis)
-
-        # Verify extracted data against source document
-        from tax_agent.verification import verify_extraction
-        verification = verify_extraction(get_enum_value(doc_type), extracted_data, raw_text)
 
         # Use tax year from classification if available
         classified_year = classification.get("tax_year")
         if classified_year and isinstance(classified_year, int):
             tax_year = classified_year
-
-        # Determine if review is needed based on classification AND verification
-        needs_review = (
-            classification.get("confidence", 0.0) < 0.8
-            or doc_type == DocumentType.UNKNOWN
-            or not verification.get("verified", True)
-            or verification.get("confidence", 1.0) < 0.7
-        )
-
-        # Combine confidence scores
-        classification_conf = classification.get("confidence", 0.0)
-        verification_conf = verification.get("confidence", 1.0)
-        combined_confidence = (classification_conf + verification_conf) / 2
 
         # Create the document
         document = TaxDocument(
@@ -222,7 +265,7 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
             extracted_data=extracted_data,
             file_path=str(file_path.absolute()),
             file_hash=file_hash,
-            confidence_score=combined_confidence,
+            confidence_score=confidence,
             needs_review=needs_review,
             created_at=datetime.now(),
             updated_at=datetime.now(),
