@@ -173,6 +173,18 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         except ValueError:
             doc_type = DocumentType.UNKNOWN
 
+        # Check if this is a tax return - suggest /review instead
+        from tax_agent.models.documents import TAX_RETURNS
+        if doc_type in TAX_RETURNS:
+            doc_type_display = get_enum_value(doc_type)
+            tax_year_hint = classification.get("tax_year", "")
+            year_str = f" ({tax_year_hint})" if tax_year_hint else ""
+            raise ValueError(
+                f"This looks like a completed tax return ({doc_type_display}{year_str}).\n\n"
+                f"Use `/review {file_path}` to check it for errors instead.\n\n"
+                f"The `/collect` command is for source documents like W2s and 1099s."
+            )
+
         # Extract structured data based on document type
         extracted_data = self._extract_data(doc_type, text_for_analysis)
 
