@@ -395,13 +395,14 @@ def _start_interactive_mode() -> None:
     # Set up prompt with Claude Code-style features
     try:
         from prompt_toolkit import PromptSession
-        from prompt_toolkit.completion import WordCompleter, FuzzyWordCompleter
+        from prompt_toolkit.completion import FuzzyWordCompleter
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
         from prompt_toolkit.history import FileHistory
         from prompt_toolkit.styles import Style
         from prompt_toolkit.formatted_text import HTML
 
-        # Persistent history file
+        # Ensure config dir exists for history file
+        config.config_dir.mkdir(parents=True, exist_ok=True)
         history_file = config.config_dir / ".command_history"
         history = FileHistory(str(history_file))
 
@@ -440,11 +441,12 @@ def _start_interactive_mode() -> None:
             style=style,
             bottom_toolbar=get_toolbar,
             complete_while_typing=True,
+            enable_history_search=True,  # Ctrl+R for reverse search
             mouse_support=False,
-            refresh_interval=0.5,
         )
 
         def get_input():
+            # Up/Down arrows navigate history, Ctrl+R for search
             return session.prompt("> ")
 
         has_autocomplete = True
