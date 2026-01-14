@@ -329,9 +329,111 @@ State: {config.state or 'Not specified'}
 app = typer.Typer(
     name="tax-agent",
     help="A CLI agent for tax document collection, analysis, and return review.",
-    no_args_is_help=True,
+    invoke_without_command=True,
 )
 console = Console()
+
+
+@app.callback()
+def main(
+    ctx: typer.Context,
+    version: Annotated[bool, typer.Option("--version", "-v", help="Show version")] = False,
+) -> None:
+    """
+    Tax Prep Agent - AI-powered tax document analysis.
+
+    Run without arguments to start interactive mode.
+    """
+    if version:
+        rprint("tax-agent version 0.1.0")
+        raise typer.Exit()
+
+    # If no command provided, start interactive mode
+    if ctx.invoked_subcommand is None:
+        _start_interactive_mode()
+
+
+def _start_interactive_mode() -> None:
+    """Start the interactive Agent SDK mode."""
+    from tax_agent.chat import TaxAdvisorChat
+
+    config = get_config()
+
+    # Check if initialized
+    if not config.is_initialized:
+        rprint(Panel.fit(
+            "[bold yellow]Welcome to Tax Prep Agent![/bold yellow]\n\n"
+            "It looks like this is your first time running the agent.\n"
+            "Let's get you set up first.",
+            title="Setup Required"
+        ))
+        rprint("\nRun [cyan]tax-agent init[/cyan] to get started.\n")
+        raise typer.Exit()
+
+    tax_year = config.tax_year
+    advisor = TaxAdvisorChat(tax_year)
+
+    # Check SDK status
+    sdk_status = "Agent SDK" if config.use_agent_sdk else "Legacy"
+
+    rprint(Panel.fit(
+        "[bold blue]Tax Prep Agent[/bold blue]\n\n"
+        f"Tax Year: {tax_year}\n"
+        f"State: {config.state or 'Not set'}\n"
+        f"Mode: {sdk_status}\n\n"
+        "[bold]Commands:[/bold]\n"
+        "  /help     - Show all slash commands\n"
+        "  /status   - View current status\n"
+        "  /analyze  - Run tax analysis\n"
+        "  /optimize - Find deductions\n\n"
+        "Or just ask a question about your taxes!\n\n"
+        "[dim]Type 'quit' to exit[/dim]",
+        title="Interactive Mode"
+    ))
+
+    # Show suggestions based on collected documents
+    suggestions = advisor.suggest_topics()
+    if suggestions:
+        rprint("\n[dim]Try asking:[/dim]")
+        for s in suggestions[:3]:
+            rprint(f"  [cyan]• {s}[/cyan]")
+    rprint("")
+
+    # Main interaction loop
+    while True:
+        try:
+            user_input = Prompt.ask("\n[bold green]>[/bold green]")
+        except (KeyboardInterrupt, EOFError):
+            rprint("\n[dim]Goodbye![/dim]")
+            break
+
+        if not user_input.strip():
+            continue
+
+        if user_input.lower() in ("quit", "exit", "bye", "q"):
+            rprint("[dim]Goodbye! Good luck with your taxes![/dim]")
+            break
+
+        if user_input.lower() == "suggest":
+            suggestions = advisor.suggest_topics()
+            rprint("\n[bold]Suggested topics:[/bold]")
+            for s in suggestions:
+                rprint(f"  [cyan]• {s}[/cyan]")
+            continue
+
+        if user_input.lower() == "reset":
+            advisor.reset()
+            rprint("[dim]Conversation reset.[/dim]")
+            continue
+
+        # Process the input (handles both slash commands and natural language)
+        with console.status("[bold green]Thinking..."):
+            response = advisor.chat(user_input)
+
+        # Render response as markdown for better formatting
+        rprint("")
+        rprint(Markdown(response))
+
 
 # Subcommands
 documents_app = typer.Typer(help="Manage collected tax documents")
