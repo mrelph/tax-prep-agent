@@ -1,17 +1,65 @@
 """CLI commands for the tax prep agent."""
 
+import asyncio
 import sys
+from enum import Enum
+from functools import wraps
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
 from rich import print as rprint
 from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from tax_agent.config import get_config
+
+
+def async_command(f):
+    """Decorator to run async commands with asyncio.run()."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(f(*args, **kwargs))
+    return wrapper
+
+
+def get_enum_value(value) -> str:
+    """Get string value from an enum or return as-is if already a string."""
+    if isinstance(value, Enum):
+        return value.value
+    return str(value) if value else ""
+
+
+def prompt_export(content: str, default_filename: str, content_type: str = "report") -> None:
+    """Prompt user to export content to MD or PDF after an operation."""
+    from pathlib import Path
+    from tax_agent.exporters import export_to_file
+
+    if Confirm.ask(f"\n[cyan]Export {content_type} to file?[/cyan]", default=False):
+        # Ask for format
+        format_choice = Prompt.ask(
+            "Format",
+            choices=["md", "pdf"],
+            default="md"
+        )
+
+        # Ask for filename
+        default_with_ext = f"{default_filename}.{format_choice}"
+        filename = Prompt.ask("Filename", default=default_with_ext)
+
+        output_path = Path(filename)
+        if not output_path.is_absolute():
+            output_path = Path.cwd() / output_path
+
+        try:
+            result_path = export_to_file(content, output_path, format_choice)
+            rprint(f"[green]Exported to: {result_path}[/green]")
+        except Exception as e:
+            rprint(f"[red]Export failed: {e}[/red]")
 
 
 def masked_input(prompt: str, mask_char: str = "*") -> str:
@@ -64,6 +112,219 @@ def masked_input(prompt: str, mask_char: str = "*") -> str:
 
     print()  # Newline after password
     return ''.join(password)
+
+
+def resolve_file_path(file_path: Path, extensions: list[str] | None = None) -> tuple[Path | None, list[Path]]:
+    """
+    Resolve a file path with smart searching and expansion.
+
+    Handles:
+    - ~ expansion for home directory
+    - Relative path resolution
+    - Glob patterns (*.pdf)
+    - Searching common directories if not found
+
+    Args:
+        file_path: The path to resolve
+        extensions: File extensions to search for (e.g., ['.pdf', '.png'])
+
+    Returns:
+        Tuple of (resolved_path, list_of_suggestions)
+        resolved_path is None if file not found
+    """
+    import glob as glob_module
+
+    if extensions is None:
+        extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif']
+
+    # Expand ~ to home directory
+    expanded = Path(str(file_path).replace('~', str(Path.home())))
+
+    # Make absolute
+    if not expanded.is_absolute():
+        expanded = Path.cwd() / expanded
+
+    # Resolve symlinks and .. components
+    try:
+        expanded = expanded.resolve()
+    except (OSError, RuntimeError):
+        pass
+
+    # If it exists, return it
+    if expanded.exists():
+        return expanded, []
+
+    # Check if it's a glob pattern
+    file_str = str(file_path)
+    if '*' in file_str or '?' in file_str:
+        # Expand ~ in glob pattern too
+        glob_pattern = file_str.replace('~', str(Path.home()))
+        matches = sorted(glob_module.glob(glob_pattern, recursive=True))
+        valid_matches = [Path(m) for m in matches if Path(m).is_file()]
+        if valid_matches:
+            return valid_matches[0] if len(valid_matches) == 1 else None, valid_matches
+        return None, []
+
+    # File not found - search common locations
+    suggestions = []
+    filename = file_path.name
+
+    # Common tax document locations
+    search_dirs = [
+        Path.cwd(),
+        Path.home() / "Documents",
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        Path.home() / "Documents" / "taxes",
+        Path.home() / "Documents" / "Taxes",
+        Path.home() / "Documents" / "Tax Documents",
+        Path.home() / "Downloads" / "taxes",
+    ]
+
+    # Search for the filename in common directories
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            # Exact match
+            potential = search_dir / filename
+            if potential.exists() and potential not in suggestions:
+                suggestions.append(potential)
+
+            # Case-insensitive search
+            try:
+                for item in search_dir.iterdir():
+                    if item.is_file() and item.name.lower() == filename.lower():
+                        if item not in suggestions:
+                            suggestions.append(item)
+            except PermissionError:
+                pass
+
+    # Also search for similar files if filename has no extension
+    if not file_path.suffix:
+        for search_dir in search_dirs[:4]:  # Only search main dirs for partial matches
+            if search_dir.exists():
+                try:
+                    for item in search_dir.iterdir():
+                        if item.is_file() and item.suffix.lower() in extensions:
+                            if filename.lower() in item.name.lower():
+                                if item not in suggestions:
+                                    suggestions.append(item)
+                except PermissionError:
+                    pass
+
+    return None, suggestions[:10]  # Limit to 10 suggestions
+
+
+def find_tax_documents(directory: Path | None = None, extensions: list[str] | None = None) -> list[Path]:
+    """
+    Find tax documents in a directory or common locations.
+
+    Args:
+        directory: Directory to search (None for common locations)
+        extensions: File extensions to include
+
+    Returns:
+        List of found document paths
+    """
+    if extensions is None:
+        extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif']
+
+    found = []
+
+    if directory:
+        search_dirs = [directory]
+    else:
+        search_dirs = [
+            Path.cwd(),
+            Path.home() / "Documents",
+            Path.home() / "Downloads",
+            Path.home() / "Desktop",
+        ]
+
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            try:
+                for item in search_dir.iterdir():
+                    if item.is_file() and item.suffix.lower() in extensions:
+                        found.append(item)
+            except PermissionError:
+                pass
+
+    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _run_agentic_analysis(analyzer, tax_year: int) -> str:
+    """
+    Run agentic analysis using the Agent SDK with streaming output.
+
+    Args:
+        analyzer: TaxAnalyzer instance
+        tax_year: Tax year for analysis
+
+    Returns:
+        Complete analysis text
+    """
+    from tax_agent.agent_sdk import get_sdk_agent, sdk_available
+
+    if not sdk_available():
+        raise RuntimeError("Agent SDK not installed")
+
+    sdk_agent = get_sdk_agent()
+    if not sdk_agent.is_available:
+        raise RuntimeError("Agent SDK not available")
+
+    # Build document summary
+    documents = analyzer.get_documents()
+    doc_summaries = []
+    source_dir = None
+
+    for doc in documents:
+        from tax_agent.utils import get_enum_value as _get_enum
+        from tax_agent.models.documents import DocumentType
+
+        summary = f"- {_get_enum(doc.document_type)} from {doc.issuer_name}"
+        if doc.extracted_data:
+            if doc.document_type == DocumentType.W2:
+                wages = doc.extracted_data.get("box_1", 0)
+                withheld = doc.extracted_data.get("box_2", 0)
+                summary += f": Wages ${wages:,.2f}, Federal withheld ${withheld:,.2f}"
+            elif doc.document_type == DocumentType.FORM_1099_INT:
+                interest = doc.extracted_data.get("box_1", 0)
+                summary += f": Interest income ${interest:,.2f}"
+            elif doc.document_type == DocumentType.FORM_1099_DIV:
+                dividends = doc.extracted_data.get("box_1a", 0)
+                summary += f": Dividends ${dividends:,.2f}"
+        doc_summaries.append(summary)
+
+        if doc.file_path and source_dir is None:
+            source_dir = Path(doc.file_path).parent
+
+    documents_text = "\n".join(doc_summaries)
+    config = get_config()
+
+    taxpayer_text = f"""
+Tax Year: {tax_year}
+State: {config.state or 'Not specified'}
+"""
+
+    # Run with streaming output
+    rprint("[dim]Agent is analyzing with tool access...[/dim]")
+    response_parts = []
+
+    async def run_analysis():
+        async for chunk in sdk_agent.analyze_documents_async(
+            documents_text,
+            taxpayer_text,
+            source_dir,
+        ):
+            response_parts.append(chunk)
+            # Print chunks as they arrive for feedback
+            rprint(f"[dim].[/dim]", end="")
+
+    asyncio.run(run_analysis())
+    rprint()  # Newline after progress dots
+
+    return "".join(response_parts)
+
 
 app = typer.Typer(
     name="tax-agent",
@@ -211,7 +472,7 @@ def init() -> None:
     rprint(f"\n[bold green]Setup Complete![/bold green]")
     rprint(f"Data directory: {config.data_dir}")
     rprint(f"AI Provider: {ai_provider}")
-    rprint(f"Model: claude-sonnet-4-5-20250514")
+    rprint(f"Model: {config.get('model', 'claude-sonnet-4-5')}")
     rprint(f"Tax Year: {config.tax_year}")
     rprint(f"State: {config.state or 'Not set'}")
     rprint("\nNext steps:")
@@ -222,6 +483,7 @@ def init() -> None:
 @app.command()
 def status() -> None:
     """Show the current status of the tax agent."""
+    import os
     from tax_agent.config import AI_PROVIDER_AWS_BEDROCK
 
     config = get_config()
@@ -237,17 +499,27 @@ def status() -> None:
     # AI Provider info
     ai_provider = config.ai_provider
     table.add_row("AI Provider", ai_provider)
-    table.add_row("Model", config.get("model", "claude-sonnet-4-5-20250514"))
+    table.add_row("Model", config.get("model", "claude-3-5-sonnet"))
 
     if ai_provider == AI_PROVIDER_AWS_BEDROCK:
         table.add_row("AWS Region", config.aws_region)
-        aws_access, _ = config.get_aws_credentials()
-        if aws_access:
-            table.add_row("AWS Credentials", "Configured (explicit)")
+        # Check if credentials are from environment
+        if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+            table.add_row("AWS Credentials", "Configured [dim](from env)[/dim]")
         else:
-            table.add_row("AWS Credentials", "Using default chain")
+            aws_access, _ = config.get_aws_credentials()
+            if aws_access:
+                table.add_row("AWS Credentials", "Configured [dim](from keyring)[/dim]")
+            else:
+                table.add_row("AWS Credentials", "Using default chain")
     else:
-        table.add_row("API Key", "Configured" if config.get_api_key() else "[red]Not set[/red]")
+        # Check if API key is from environment
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            table.add_row("API Key", "Configured [dim](from env)[/dim]")
+        elif config.get_api_key():
+            table.add_row("API Key", "Configured [dim](from keyring)[/dim]")
+        else:
+            table.add_row("API Key", "[red]Not set[/red]")
 
     table.add_row("Data Directory", str(config.data_dir))
 
@@ -255,6 +527,113 @@ def status() -> None:
 
     if not config.is_initialized:
         rprint("\n[yellow]Run 'tax-agent init' to get started.[/yellow]")
+
+
+@app.command(name="find")
+def find_docs(
+    directory: Annotated[Optional[Path], typer.Argument(help="Directory to search (default: common locations)")] = None,
+    pattern: Annotated[Optional[str], typer.Option("--pattern", "-p", help="Filename pattern to match")] = None,
+    limit: Annotated[int, typer.Option("--limit", "-n", help="Maximum files to show")] = 20,
+) -> None:
+    """Find tax documents (PDFs, images) on your system.
+
+    Searches common locations like Documents, Downloads, and Desktop.
+    Use --pattern to filter by filename.
+
+    Examples:
+        tax-agent find                    # Search common locations
+        tax-agent find ~/taxes            # Search specific directory
+        tax-agent find -p w2              # Find files containing 'w2'
+        tax-agent find -p "2024"          # Find files with '2024' in name
+    """
+    import glob as glob_module
+
+    extensions = ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif']
+
+    # Determine search directories
+    if directory:
+        resolved_dir = Path(str(directory).replace('~', str(Path.home())))
+        if not resolved_dir.is_absolute():
+            resolved_dir = Path.cwd() / resolved_dir
+        resolved_dir = resolved_dir.resolve()
+
+        if not resolved_dir.exists():
+            rprint(f"[red]Directory not found: {directory}[/red]")
+            raise typer.Exit(1)
+
+        search_dirs = [resolved_dir]
+        rprint(f"[cyan]Searching in: {resolved_dir}[/cyan]\n")
+    else:
+        search_dirs = [
+            Path.cwd(),
+            Path.home() / "Documents",
+            Path.home() / "Downloads",
+            Path.home() / "Desktop",
+        ]
+        rprint("[cyan]Searching common locations...[/cyan]\n")
+
+    found_files = []
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+
+        try:
+            for item in search_dir.rglob("*"):
+                if item.is_file() and item.suffix.lower() in extensions:
+                    # Apply pattern filter if specified
+                    if pattern:
+                        if pattern.lower() not in item.name.lower():
+                            continue
+                    found_files.append(item)
+        except PermissionError:
+            continue
+
+    if not found_files:
+        rprint("[yellow]No tax documents found.[/yellow]")
+        if pattern:
+            rprint(f"[dim]No files matching '{pattern}' with extensions: {', '.join(extensions)}[/dim]")
+        else:
+            rprint(f"[dim]Looking for files with extensions: {', '.join(extensions)}[/dim]")
+        raise typer.Exit(0)
+
+    # Sort by modification time (newest first)
+    found_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    # Limit results
+    if len(found_files) > limit:
+        rprint(f"[dim]Showing {limit} of {len(found_files)} files (use --limit to show more)[/dim]\n")
+        found_files = found_files[:limit]
+
+    # Display results
+    table = Table(title=f"Found {len(found_files)} Document(s)")
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Filename", style="cyan")
+    table.add_column("Location", style="dim")
+    table.add_column("Size", justify="right", style="green")
+
+    for i, f in enumerate(found_files, 1):
+        size = f.stat().st_size
+        if size >= 1024 * 1024:
+            size_str = f"{size / (1024*1024):.1f} MB"
+        elif size >= 1024:
+            size_str = f"{size / 1024:.1f} KB"
+        else:
+            size_str = f"{size} B"
+
+        # Show path relative to home if possible
+        try:
+            rel_path = f.parent.relative_to(Path.home())
+            location = f"~/{rel_path}"
+        except ValueError:
+            location = str(f.parent)
+
+        table.add_row(str(i), f.name, location, size_str)
+
+    console.print(table)
+
+    rprint("\n[dim]To process a file:[/dim]")
+    if found_files:
+        rprint(f"  tax-agent collect \"{found_files[0]}\"")
 
 
 @app.command()
@@ -328,6 +707,7 @@ def collect(
     file: Annotated[Path, typer.Argument(help="Path to tax document (PDF or image)")],
     year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
     directory: Annotated[Optional[Path], typer.Option("--dir", "-d", help="Process all files in directory")] = None,
+    replace: Annotated[bool, typer.Option("--replace", "-r", help="Replace existing document if duplicate")] = False,
 ) -> None:
     """Collect and process a tax document."""
     from tax_agent.collectors.document_classifier import DocumentCollector
@@ -342,15 +722,21 @@ def collect(
     collector = DocumentCollector()
 
     if directory:
-        # Process directory
-        if not directory.is_dir():
+        # Process directory - resolve path first
+        resolved_dir = Path(str(directory).replace('~', str(Path.home())))
+        if not resolved_dir.is_absolute():
+            resolved_dir = Path.cwd() / resolved_dir
+        resolved_dir = resolved_dir.resolve()
+
+        if not resolved_dir.is_dir():
             rprint(f"[red]Not a directory: {directory}[/red]")
+            rprint(f"[dim]Resolved path: {resolved_dir}[/dim]")
             raise typer.Exit(1)
 
-        rprint(f"[cyan]Processing documents in {directory} for tax year {tax_year}...[/cyan]")
+        rprint(f"[cyan]Processing documents in {resolved_dir} for tax year {tax_year}...[/cyan]")
 
         with console.status("[bold green]Processing files..."):
-            results = collector.process_directory(directory, tax_year)
+            results = collector.process_directory(resolved_dir, tax_year)
 
         for file_path, result in results:
             if isinstance(result, Exception):
@@ -358,21 +744,53 @@ def collect(
             else:
                 confidence = "high" if result.confidence_score >= 0.8 else "low"
                 review_flag = " [yellow](needs review)[/yellow]" if result.needs_review else ""
-                rprint(f"[green]  {file_path.name}: {result.document_type.value} from {result.issuer_name} ({confidence} confidence){review_flag}[/green]")
+                rprint(f"[green]  {file_path.name}: {get_enum_value(result.document_type)} from {result.issuer_name} ({confidence} confidence){review_flag}[/green]")
 
         success_count = sum(1 for _, r in results if not isinstance(r, Exception))
         rprint(f"\n[cyan]Processed {success_count}/{len(results)} files successfully.[/cyan]")
     else:
-        # Process single file
-        if not file.exists():
+        # Process single file - use smart path resolution
+        resolved_file, suggestions = resolve_file_path(file)
+
+        # Check for glob patterns that returned multiple files
+        if suggestions and resolved_file is None and ('*' in str(file) or '?' in str(file)):
+            rprint(f"[cyan]Found {len(suggestions)} files matching pattern:[/cyan]")
+            for i, s in enumerate(suggestions, 1):
+                rprint(f"  {i}. {s}")
+
+            if Confirm.ask("\n[yellow]Process all matching files?[/yellow]"):
+                rprint(f"\n[cyan]Processing {len(suggestions)} files for tax year {tax_year}...[/cyan]")
+                for match in suggestions:
+                    try:
+                        with console.status(f"[bold green]Processing {match.name}..."):
+                            doc = collector.process_file(match, tax_year, replace=replace)
+                        rprint(f"[green]  ✓ {match.name}: {get_enum_value(doc.document_type)}[/green]")
+                    except Exception as e:
+                        rprint(f"[red]  ✗ {match.name}: {e}[/red]")
+                raise typer.Exit(0)
+            raise typer.Exit(0)
+
+        if resolved_file is None:
             rprint(f"[red]File not found: {file}[/red]")
+
+            if suggestions:
+                rprint(f"\n[yellow]Did you mean one of these?[/yellow]")
+                for i, s in enumerate(suggestions, 1):
+                    rprint(f"  {i}. {s}")
+                rprint(f"\n[dim]Tip: Use the full path or navigate to the file's directory first.[/dim]")
+            else:
+                rprint(f"\n[dim]Searched in: current directory, ~/Documents, ~/Downloads, ~/Desktop[/dim]")
+                rprint(f"[dim]Tip: Use 'tax-agent collect \"*.pdf\"' to find PDF files in current directory.[/dim]")
             raise typer.Exit(1)
 
+        file = resolved_file
         rprint(f"[cyan]Processing {file.name} for tax year {tax_year}...[/cyan]")
+        if resolved_file != Path(str(file).replace('~', str(Path.home()))).resolve():
+            rprint(f"[dim]Found at: {file}[/dim]")
 
         try:
             with console.status("[bold green]Extracting and analyzing document..."):
-                doc = collector.process_file(file, tax_year)
+                doc = collector.process_file(file, tax_year, replace=replace)
 
             rprint(f"\n[green]Document processed successfully![/green]")
 
@@ -382,7 +800,7 @@ def collect(
             table.add_column("Value", style="white")
 
             table.add_row("ID", doc.id[:8] + "...")
-            table.add_row("Type", doc.document_type.value)
+            table.add_row("Type", get_enum_value(doc.document_type))
             table.add_row("Issuer", doc.issuer_name)
             if doc.issuer_ein:
                 table.add_row("EIN", doc.issuer_ein)
@@ -396,15 +814,15 @@ def collect(
 
             # Show key financial data
             if doc.extracted_data:
-                if doc.document_type.value == "W2":
+                if get_enum_value(doc.document_type) == "W2":
                     if "box_1" in doc.extracted_data:
                         table.add_row("Wages (Box 1)", f"${doc.extracted_data['box_1']:,.2f}")
                     if "box_2" in doc.extracted_data:
                         table.add_row("Fed Tax Withheld", f"${doc.extracted_data['box_2']:,.2f}")
-                elif "1099_INT" in doc.document_type.value:
+                elif "1099_INT" in get_enum_value(doc.document_type):
                     if "box_1" in doc.extracted_data:
                         table.add_row("Interest Income", f"${doc.extracted_data['box_1']:,.2f}")
-                elif "1099_DIV" in doc.document_type.value:
+                elif "1099_DIV" in get_enum_value(doc.document_type):
                     if "box_1a" in doc.extracted_data:
                         table.add_row("Dividends", f"${doc.extracted_data['box_1a']:,.2f}")
 
@@ -420,6 +838,7 @@ def analyze(
     year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
     summary: Annotated[bool, typer.Option("--summary", "-s", help="Brief summary only")] = False,
     ai: Annotated[bool, typer.Option("--ai", help="Include AI-powered analysis")] = True,
+    agentic: Annotated[bool, typer.Option("--agentic", help="Use Agent SDK with tool access (requires SDK enabled)")] = False,
 ) -> None:
     """Analyze collected documents for tax implications."""
     from tax_agent.analyzers.implications import TaxAnalyzer
@@ -429,6 +848,12 @@ def analyze(
     if not config.is_initialized:
         rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
         raise typer.Exit(1)
+
+    # Check if agentic mode requested but SDK not enabled
+    if agentic and not config.use_agent_sdk:
+        rprint("[yellow]Agent SDK not enabled. Enable with: tax-agent config set use_agent_sdk true[/yellow]")
+        rprint("[dim]Falling back to standard analysis...[/dim]\n")
+        agentic = False
 
     tax_year = year or config.tax_year
 
@@ -499,10 +924,45 @@ def analyze(
     # AI Analysis
     if ai and not summary:
         rprint("\n")
-        with console.status("[bold green]Generating AI analysis..."):
-            ai_analysis = analyzer.generate_ai_analysis()
+        if agentic:
+            # Use Agent SDK with streaming
+            rprint("[dim]Using Agent SDK with tool access...[/dim]\n")
+            try:
+                ai_analysis = _run_agentic_analysis(analyzer, tax_year)
+            except Exception as e:
+                rprint(f"[yellow]Agent SDK error: {e}[/yellow]")
+                rprint("[dim]Falling back to standard AI analysis...[/dim]")
+                with console.status("[bold green]Generating AI analysis..."):
+                    ai_analysis = analyzer.generate_ai_analysis()
+        else:
+            with console.status("[bold green]Generating AI analysis..."):
+                ai_analysis = analyzer.generate_ai_analysis()
 
         rprint(Panel(ai_analysis, title="AI Tax Analysis", border_style="blue"))
+
+    # Generate analysis markdown for export
+    analysis_md = f"""# Tax Analysis - {tax_year}
+
+## Income Summary
+- **Total Income:** ${analysis.get('total_income', 0):,.2f}
+- **Taxable Income:** ${analysis.get('taxable_income', 0):,.2f}
+
+## Tax Calculation
+- **Federal Tax:** ${analysis.get('federal_tax', 0):,.2f}
+- **State Tax:** ${analysis.get('state_tax', 0):,.2f}
+- **Total Tax:** ${analysis.get('total_tax', 0):,.2f}
+
+## Withholdings
+- **Federal Withholding:** ${analysis.get('federal_withholding', 0):,.2f}
+- **State Withholding:** ${analysis.get('state_withholding', 0):,.2f}
+
+## Result
+{"**Estimated Refund:** $" + f"{analysis.get('estimated_refund', 0):,.2f}" if analysis.get('refund_or_owed', 0) > 0 else "**Estimated Owed:** $" + f"{analysis.get('estimated_owed', 0):,.2f}"}
+
+---
+*Generated by Tax Prep Agent*
+"""
+    prompt_export(analysis_md, f"analysis-{tax_year}", "analysis")
 
 
 @app.command()
@@ -699,6 +1159,52 @@ def optimize(
     else:
         rprint(f"[red]Error finding deductions: {deductions.get('error')}[/red]")
 
+    # Generate optimization report for export
+    optimization_md_parts = [f"# Tax Optimization Report - {tax_year}\n"]
+
+    if "error" not in deductions:
+        std_vs_item = deductions.get("standard_vs_itemized", {})
+        if isinstance(std_vs_item, dict):
+            recommendation = std_vs_item.get("recommendation", "standard")
+            reasoning = std_vs_item.get("reasoning", "")
+        else:
+            recommendation = str(std_vs_item)
+            reasoning = ""
+
+        optimization_md_parts.append(f"## Deduction Strategy\n**Recommendation:** {recommendation.upper()}\n{reasoning}\n")
+
+        rec_deductions = deductions.get("recommended_deductions", [])
+        if rec_deductions:
+            optimization_md_parts.append("## Recommended Deductions\n")
+            for ded in rec_deductions:
+                if isinstance(ded, dict):
+                    name = ded.get("name", "Unknown")
+                    value = ded.get("estimated_value", 0)
+                    action = ded.get("action_needed", "")
+                    optimization_md_parts.append(f"- **{name}:** ${value:,.0f}\n  - Action: {action}\n")
+
+        rec_credits = deductions.get("recommended_credits", [])
+        if rec_credits:
+            optimization_md_parts.append("\n## Recommended Credits\n")
+            for credit in rec_credits:
+                if isinstance(credit, dict):
+                    name = credit.get("name", "Unknown")
+                    value = credit.get("estimated_value", 0)
+                    optimization_md_parts.append(f"- **{name}:** ${value:,.0f}\n")
+
+        savings = deductions.get("estimated_total_savings", 0)
+        if savings:
+            optimization_md_parts.append(f"\n## Estimated Savings\n**Total Tax Savings:** ${savings:,.0f}\n")
+
+        action_items = deductions.get("action_items", [])
+        if action_items:
+            optimization_md_parts.append("\n## Action Items\n")
+            for item in action_items:
+                optimization_md_parts.append(f"- {item}\n")
+
+    optimization_md_parts.append("\n---\n*Generated by Tax Prep Agent*\n")
+    prompt_export("".join(optimization_md_parts), f"optimization-{tax_year}", "optimization report")
+
 
 @app.command()
 def review(
@@ -758,7 +1264,7 @@ def review(
             impact_str = f"${finding.potential_impact:,.0f}" if finding.potential_impact else "-"
 
             findings_table.add_row(
-                f"[{color}]{finding.severity.value.upper()}[/{color}]",
+                f"[{color}]{get_enum_value(finding.severity).upper()}[/{color}]",
                 finding.category,
                 finding.title,
                 impact_str,
@@ -770,13 +1276,241 @@ def review(
         rprint("\n[bold]Detailed Findings:[/bold]\n")
         for i, finding in enumerate(review_result.findings, 1):
             color = severity_colors.get(finding.severity, "white")
-            rprint(f"[{color}]{i}. {finding.severity.value.upper()}: {finding.title}[/{color}]")
+            rprint(f"[{color}]{i}. {get_enum_value(finding.severity).upper()}: {finding.title}[/{color}]")
+            rprint(f"   [cyan]Category:[/cyan] {finding.category}")
             rprint(f"   {finding.description}")
+            if finding.line_reference:
+                rprint(f"   [dim]Form Reference:[/dim] {finding.line_reference}")
+            if finding.expected_value:
+                rprint(f"   [green]Expected:[/green] {finding.expected_value}")
+            if finding.actual_value:
+                rprint(f"   [red]Actual:[/red] {finding.actual_value}")
+            if finding.potential_impact:
+                rprint(f"   [yellow]Potential Tax Impact:[/yellow] ${finding.potential_impact:,.2f}")
             if finding.recommendation:
-                rprint(f"   [dim]Recommendation: {finding.recommendation}[/dim]")
+                rprint(f"   [bold]Recommendation:[/bold] {finding.recommendation}")
+            if finding.source_document_id:
+                rprint(f"   [dim]Related Document:[/dim] {finding.source_document_id}")
             rprint("")
     else:
         rprint("\n[green]No issues found in the tax return.[/green]")
+
+    # Save the review to database
+    from tax_agent.storage.database import get_database
+    from tax_agent.exporters import export_review_markdown
+    db = get_database()
+    db.save_review(review_result)
+    rprint(f"\n[dim]Review saved (ID: {review_result.id[:8]}...)[/dim]")
+
+    # Prompt for export
+    review_dict = {
+        "id": review_result.id,
+        "tax_year": review_result.return_summary.tax_year,
+        "return_type": get_enum_value(review_result.return_summary.return_type),
+        "overall_assessment": review_result.overall_assessment,
+        "summary": review_result.return_summary.model_dump(),
+        "findings": [f.model_dump() for f in review_result.findings],
+        "created_at": review_result.reviewed_at.isoformat(),
+    }
+    markdown_content = export_review_markdown(review_dict)
+    prompt_export(markdown_content, f"review-{tax_year}", "review")
+
+
+@app.command()
+def reviews(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Filter by tax year")] = None,
+) -> None:
+    """List saved tax return reviews."""
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    db = get_database()
+    saved_reviews = db.get_reviews(tax_year=year)
+
+    if not saved_reviews:
+        rprint(f"[yellow]No saved reviews{f' for tax year {year}' if year else ''}.[/yellow]")
+        return
+
+    table = Table(title="Saved Reviews")
+    table.add_column("ID", style="dim")
+    table.add_column("Tax Year", style="cyan")
+    table.add_column("Type", style="white")
+    table.add_column("Findings", justify="right")
+    table.add_column("Date", style="dim")
+
+    for rev in saved_reviews:
+        table.add_row(
+            rev["id"][:8] + "...",
+            str(rev["tax_year"]),
+            rev["return_type"],
+            str(len(rev["findings"])),
+            rev["created_at"][:10],
+        )
+
+    console.print(table)
+    rprint("\n[dim]Use 'tax-agent review-show <id>' to view details[/dim]")
+
+
+@app.command("review-show")
+def review_show(
+    review_id: Annotated[str, typer.Argument(help="Review ID (can be partial)")],
+) -> None:
+    """Show details of a saved review."""
+    from tax_agent.storage.database import get_database
+    from tax_agent.models.returns import ReviewSeverity
+    import json
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    db = get_database()
+    review = db.get_review(review_id)
+
+    if not review:
+        rprint(f"[red]Review not found: {review_id}[/red]")
+        raise typer.Exit(1)
+
+    # Display summary
+    summary = review["summary"]
+    rprint(Panel.fit(
+        f"[bold]Tax Return Review[/bold]\n"
+        f"Tax Year: {review['tax_year']}\n"
+        f"Return Type: {review['return_type']}\n"
+        f"Reviewed: {review['created_at'][:10]}",
+        title=f"Review {review['id'][:8]}..."
+    ))
+
+    # Display overall assessment
+    if summary.get("overall_assessment"):
+        rprint(f"\n[bold]Overall Assessment:[/bold] {summary['overall_assessment']}")
+
+    # Display return summary if available
+    if summary:
+        rprint("\n[bold]Return Summary:[/bold]")
+        if summary.get("filing_status"):
+            rprint(f"  Filing Status: {summary['filing_status']}")
+        if summary.get("total_income"):
+            rprint(f"  Total Income: ${summary['total_income']:,.2f}")
+        if summary.get("taxable_income"):
+            rprint(f"  Taxable Income: ${summary['taxable_income']:,.2f}")
+        if summary.get("total_tax"):
+            rprint(f"  Total Tax: ${summary['total_tax']:,.2f}")
+        if summary.get("refund_amount"):
+            rprint(f"  [green]Refund Due: ${summary['refund_amount']:,.2f}[/green]")
+        if summary.get("amount_owed"):
+            rprint(f"  [yellow]Tax Owed: ${summary['amount_owed']:,.2f}[/yellow]")
+
+    # Display findings
+    findings = review["findings"]
+    if findings:
+        rprint(f"\n[bold]{len(findings)} Finding(s):[/bold]\n")
+
+        # Use lowercase keys to match enum values
+        severity_colors = {
+            "error": "red",
+            "warning": "yellow",
+            "suggestion": "blue",
+            "info": "dim",
+        }
+
+        for i, finding in enumerate(findings, 1):
+            severity = str(finding.get("severity", "info")).lower()
+            color = severity_colors.get(severity, "white")
+            rprint(f"[{color}]{i}. {severity.upper()}: {finding.get('title', 'N/A')}[/{color}]")
+            if finding.get("category"):
+                rprint(f"   [cyan]Category:[/cyan] {finding['category']}")
+            rprint(f"   {finding.get('description', '')}")
+            if finding.get("line_reference"):
+                rprint(f"   [dim]Form Reference:[/dim] {finding['line_reference']}")
+            if finding.get("expected_value"):
+                rprint(f"   [green]Expected:[/green] {finding['expected_value']}")
+            if finding.get("actual_value"):
+                rprint(f"   [red]Actual:[/red] {finding['actual_value']}")
+            if finding.get("potential_impact"):
+                rprint(f"   [yellow]Potential Tax Impact:[/yellow] ${finding['potential_impact']:,.2f}")
+            if finding.get("recommendation"):
+                rprint(f"   [bold]Recommendation:[/bold] {finding['recommendation']}")
+            if finding.get("source_document_id"):
+                rprint(f"   [dim]Related Document:[/dim] {finding['source_document_id']}")
+            rprint("")
+    else:
+        rprint("\n[green]No issues found in this review.[/green]")
+
+
+@app.command()
+def export(
+    output: Annotated[Path, typer.Argument(help="Output file path")],
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: md or pdf")] = "md",
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+    review_id: Annotated[Optional[str], typer.Option("--review", "-r", help="Export specific review")] = None,
+    documents_only: Annotated[bool, typer.Option("--documents", "-d", help="Export only documents")] = False,
+) -> None:
+    """Export tax data to Markdown or PDF format.
+
+    Examples:
+        tax-agent export report.md                    # Full report as markdown
+        tax-agent export report.pdf -f pdf            # Full report as PDF
+        tax-agent export docs.md --documents          # Documents only
+        tax-agent export review.pdf -r abc123 -f pdf  # Specific review as PDF
+    """
+    from tax_agent.exporters import (
+        export_review_markdown,
+        export_documents_markdown,
+        export_full_report_markdown,
+        export_to_file,
+    )
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+
+    # Validate format
+    format = format.lower()
+    if format not in ("md", "pdf", "markdown"):
+        rprint(f"[red]Invalid format: {format}. Use 'md' or 'pdf'.[/red]")
+        raise typer.Exit(1)
+
+    if format == "markdown":
+        format = "md"
+
+    with console.status(f"[bold green]Generating {format.upper()} export..."):
+        if review_id:
+            # Export specific review
+            review = db.get_review(review_id)
+            if not review:
+                rprint(f"[red]Review not found: {review_id}[/red]")
+                raise typer.Exit(1)
+            content = export_review_markdown(review)
+        elif documents_only:
+            # Export documents only
+            documents = db.get_documents(tax_year=tax_year)
+            if not documents:
+                rprint(f"[yellow]No documents found for tax year {tax_year}.[/yellow]")
+                raise typer.Exit(1)
+            content = export_documents_markdown(documents, tax_year)
+        else:
+            # Export full report
+            content = export_full_report_markdown(tax_year)
+
+        # Write to file
+        output_path = export_to_file(content, output, format)
+
+    rprint(f"[green]Exported to: {output_path}[/green]")
+    rprint(f"[dim]Format: {format.upper()}, Tax Year: {tax_year}[/dim]")
 
 
 # =============================================================================
@@ -811,7 +1545,7 @@ def ai_validate(
     for doc in documents:
         docs_data.append({
             "id": doc.id[:8],
-            "type": doc.document_type.value,
+            "type": get_enum_value(doc.document_type),
             "issuer": doc.issuer_name,
             "extracted_data": doc.extracted_data,
         })
@@ -908,7 +1642,7 @@ def ai_audit_risk(
     docs_summary = []
     for doc in documents:
         docs_summary.append({
-            "type": doc.document_type.value,
+            "type": get_enum_value(doc.document_type),
             "issuer": doc.issuer_name,
             "data": doc.extracted_data,
         })
@@ -1101,7 +1835,7 @@ def ai_missing(
     docs_summary = []
     for doc in documents:
         docs_summary.append({
-            "type": doc.document_type.value,
+            "type": get_enum_value(doc.document_type),
             "issuer": doc.issuer_name,
             "data_keys": list(doc.extracted_data.keys()) if doc.extracted_data else [],
         })
@@ -1419,6 +2153,109 @@ def ai_plan(
         rprint(f"\n[bold]Planning Summary:[/bold] {result['summary']}")
 
 
+@ai_app.command("subagents")
+def ai_subagents_list() -> None:
+    """List available specialized AI subagents."""
+    from tax_agent.subagents import list_subagents
+
+    subagents = list_subagents()
+
+    rprint(Panel.fit(
+        "[bold]Specialized Tax Subagents[/bold]\n\n"
+        "These subagents can be invoked for specific tax analysis tasks.\n"
+        "Use 'tax-agent ai invoke <name>' to run a subagent.",
+        title="Available Subagents"
+    ))
+
+    table = Table()
+    table.add_column("Name", style="cyan")
+    table.add_column("Description", style="white")
+
+    for agent in subagents:
+        table.add_row(agent["name"], agent["description"])
+
+    console.print(table)
+
+    rprint("\n[dim]Example: tax-agent ai invoke deduction-finder --prompt \"Find all deductions for my W-2 income\"[/dim]")
+
+
+@ai_app.command("invoke")
+def ai_invoke_subagent(
+    name: Annotated[str, typer.Argument(help="Subagent name (e.g., deduction-finder)")],
+    prompt: Annotated[Optional[str], typer.Option("--prompt", "-p", help="Task prompt for the subagent")] = None,
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Invoke a specialized subagent for targeted tax analysis."""
+    from tax_agent.subagents import get_subagent, list_subagents
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    # Check if SDK is enabled
+    if not config.use_agent_sdk:
+        rprint("[yellow]Agent SDK not enabled. Subagents require the SDK.[/yellow]")
+        rprint("[dim]Enable with: tax-agent config set use_agent_sdk true[/dim]")
+        raise typer.Exit(1)
+
+    # Validate subagent name
+    subagent = get_subagent(name)
+    if not subagent:
+        rprint(f"[red]Unknown subagent: {name}[/red]")
+        rprint("\n[dim]Available subagents:[/dim]")
+        for agent in list_subagents():
+            rprint(f"  • {agent['name']}: {agent['description']}")
+        raise typer.Exit(1)
+
+    # Get prompt if not provided
+    if not prompt:
+        rprint(f"[bold]{subagent.name}[/bold]: {subagent.description}\n")
+        prompt = Prompt.ask("[cyan]Enter your task for this subagent[/cyan]")
+        if not prompt.strip():
+            rprint("[red]No prompt provided.[/red]")
+            raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+
+    # Get source directory from documents
+    from tax_agent.storage.database import get_database
+    db = get_database()
+    documents = db.get_documents(tax_year=tax_year)
+    source_dir = None
+    if documents:
+        for doc in documents:
+            if doc.file_path:
+                source_dir = Path(doc.file_path).parent
+                break
+
+    rprint(f"\n[cyan]Invoking {subagent.name} for tax year {tax_year}...[/cyan]")
+    rprint(f"[dim]Task: {prompt[:100]}{'...' if len(prompt) > 100 else ''}[/dim]\n")
+
+    # Import and run SDK
+    from tax_agent.agent_sdk import get_sdk_agent, sdk_available
+
+    if not sdk_available():
+        rprint("[red]Agent SDK not installed. Install claude-code-sdk package.[/red]")
+        raise typer.Exit(1)
+
+    sdk_agent = get_sdk_agent()
+
+    # Build context prompt
+    context_prompt = f"""Tax Year: {tax_year}
+State: {config.state or 'Not specified'}
+Documents collected: {len(documents)}
+
+Task: {prompt}"""
+
+    # Run with streaming output
+    with console.status(f"[bold green]{subagent.name} is working..."):
+        result = sdk_agent.invoke_subagent(name, context_prompt, source_dir)
+
+    rprint(Panel(result, title=f"{subagent.name} Analysis", border_style="blue"))
+
+
 # Document subcommands
 @documents_app.command("list")
 def documents_list(
@@ -1451,7 +2288,7 @@ def documents_list(
         status = "[yellow]Review[/yellow]" if doc.needs_review else "[green]Ready[/green]"
         table.add_row(
             doc.id[:8] + "...",
-            doc.document_type.value,
+            get_enum_value(doc.document_type),
             doc.issuer_name[:30],
             status,
         )
@@ -1487,14 +2324,14 @@ def documents_show(
         elif len(matches) > 1:
             rprint(f"[yellow]Multiple documents match '{doc_id}':[/yellow]")
             for d in matches:
-                rprint(f"  {d.id[:8]}... - {d.document_type.value} from {d.issuer_name}")
+                rprint(f"  {d.id[:8]}... - {get_enum_value(d.document_type)} from {d.issuer_name}")
             return
         else:
             rprint(f"[red]Document not found: {doc_id}[/red]")
             raise typer.Exit(1)
 
     # Display document details
-    rprint(Panel.fit(f"[bold]{doc.document_type.value}[/bold] from [cyan]{doc.issuer_name}[/cyan]", title="Document"))
+    rprint(Panel.fit(f"[bold]{get_enum_value(doc.document_type)}[/bold] from [cyan]{doc.issuer_name}[/cyan]", title="Document"))
 
     table = Table(show_header=False, box=None)
     table.add_column("Field", style="cyan", width=20)
@@ -1502,7 +2339,7 @@ def documents_show(
 
     table.add_row("ID", doc.id)
     table.add_row("Tax Year", str(doc.tax_year))
-    table.add_row("Document Type", doc.document_type.value)
+    table.add_row("Document Type", get_enum_value(doc.document_type))
     table.add_row("Issuer", doc.issuer_name)
     if doc.issuer_ein:
         table.add_row("EIN", doc.issuer_ein)
@@ -1517,6 +2354,73 @@ def documents_show(
     if doc.extracted_data:
         rprint("\n[bold]Extracted Data:[/bold]")
         rprint(json.dumps(doc.extracted_data, indent=2))
+
+
+@documents_app.command("delete")
+def documents_delete(
+    doc_id: Annotated[str, typer.Argument(help="Document ID (can be partial, or 'all' to delete all)")],
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year (required with 'all')")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Skip confirmation")] = False,
+) -> None:
+    """Delete a document by ID, or all documents for a tax year."""
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    db = get_database()
+
+    if doc_id.lower() == "all":
+        tax_year = year or config.tax_year
+        documents = db.get_documents(tax_year=tax_year)
+
+        if not documents:
+            rprint(f"[yellow]No documents to delete for tax year {tax_year}.[/yellow]")
+            return
+
+        if not force:
+            if not Confirm.ask(f"[yellow]Delete all {len(documents)} documents for tax year {tax_year}?[/yellow]"):
+                rprint("[dim]Cancelled.[/dim]")
+                return
+
+        deleted = 0
+        for doc in documents:
+            if db.delete_document(doc.id):
+                deleted += 1
+
+        rprint(f"[green]Deleted {deleted} document(s).[/green]")
+    else:
+        # Find the document
+        doc = db.get_document(doc_id)
+        if not doc:
+            # Try partial match
+            all_docs = db.get_documents()
+            matches = [d for d in all_docs if d.id.startswith(doc_id)]
+            if len(matches) == 1:
+                doc = matches[0]
+            elif len(matches) > 1:
+                rprint(f"[yellow]Multiple documents match '{doc_id}':[/yellow]")
+                for d in matches:
+                    rprint(f"  {d.id[:8]}... - {get_enum_value(d.document_type)} from {d.issuer_name}")
+                rprint("\n[dim]Please provide a more specific ID.[/dim]")
+                return
+            else:
+                rprint(f"[red]Document not found: {doc_id}[/red]")
+                raise typer.Exit(1)
+
+        if not force:
+            if not Confirm.ask(f"[yellow]Delete {get_enum_value(doc.document_type)} from {doc.issuer_name}?[/yellow]"):
+                rprint("[dim]Cancelled.[/dim]")
+                return
+
+        if db.delete_document(doc.id):
+            rprint(f"[green]Document deleted.[/green]")
+        else:
+            rprint(f"[red]Failed to delete document.[/red]")
+            raise typer.Exit(1)
 
 
 # Config subcommands
@@ -1954,7 +2858,7 @@ def drive_collect(
                     " [yellow](needs review)[/yellow]" if result.needs_review else ""
                 )
                 rprint(
-                    f"[green]  {filename}: {result.document_type.value} from "
+                    f"[green]  {filename}: {get_enum_value(result.document_type)} from "
                     f"{result.issuer_name} ({confidence} confidence){review_flag}[/green]"
                 )
                 success_count += 1

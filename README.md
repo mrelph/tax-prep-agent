@@ -834,6 +834,17 @@ tax-prep-agent/
 └── README.md
 ```
 
+## Documentation
+
+Comprehensive documentation is available in the `/docs` directory:
+
+- **[Usage Guide](docs/USAGE.md)** - Complete CLI command reference with examples
+- **[Google Drive Setup](docs/GOOGLE_DRIVE_SETUP.md)** - Step-by-step OAuth integration guide
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and component documentation
+- **[API Reference](docs/API.md)** - Python module and API documentation
+
+See the [Documentation Index](docs/README.md) for a complete guide to all documentation.
+
 ## Contributing
 
 Contributions are welcome! Areas for improvement:
@@ -845,6 +856,8 @@ Contributions are welcome! Areas for improvement:
 5. **Tax planning**: Forward-looking tax planning features
 6. **Export capabilities**: Export to TurboTax, H&R Block formats
 7. **Audit trail**: Better documentation and audit logging
+
+Please see [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [API.md](docs/API.md) for technical details on extending the system.
 
 ## License
 

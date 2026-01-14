@@ -17,6 +17,7 @@ from tax_agent.models.returns import (
     TaxReturnSummary,
 )
 from tax_agent.storage.database import get_database
+from tax_agent.utils import get_enum_value
 
 
 class ReturnReviewer:
@@ -100,10 +101,10 @@ class ReturnReviewer:
         lines = [f"Source Documents for Tax Year {self.tax_year}:\n"]
 
         for doc in documents:
-            line = f"- {doc.document_type.value} from {doc.issuer_name}"
+            line = f"- {get_enum_value(doc.document_type)} from {doc.issuer_name}"
             data = doc.extracted_data
 
-            if doc.document_type.value == "W2":
+            if get_enum_value(doc.document_type) == "W2":
                 wages = data.get("box_1", 0) or 0
                 federal_withheld = data.get("box_2", 0) or 0
                 state_withheld = data.get("box_17", 0) or 0
@@ -111,17 +112,17 @@ class ReturnReviewer:
                 line += f"\n  Federal Withheld: ${federal_withheld:,.2f}"
                 line += f"\n  State Withheld: ${state_withheld:,.2f}"
 
-            elif doc.document_type.value == "1099_INT":
+            elif get_enum_value(doc.document_type) == "1099_INT":
                 interest = data.get("box_1", 0) or 0
                 line += f"\n  Interest Income: ${interest:,.2f}"
 
-            elif doc.document_type.value == "1099_DIV":
+            elif get_enum_value(doc.document_type) == "1099_DIV":
                 ordinary = data.get("box_1a", 0) or 0
                 qualified = data.get("box_1b", 0) or 0
                 line += f"\n  Ordinary Dividends: ${ordinary:,.2f}"
                 line += f"\n  Qualified Dividends: ${qualified:,.2f}"
 
-            elif doc.document_type.value == "1099_B":
+            elif get_enum_value(doc.document_type) == "1099_B":
                 summary = data.get("summary", {})
                 proceeds = summary.get("total_proceeds", 0) or 0
                 line += f"\n  Total Proceeds: ${proceeds:,.2f}"
@@ -139,17 +140,17 @@ class ReturnReviewer:
         findings: list[ReviewFinding] = []
 
         # Count expected income sources
-        w2_count = sum(1 for d in source_docs if d.document_type.value == "W2")
-        int_count = sum(1 for d in source_docs if d.document_type.value == "1099_INT")
-        div_count = sum(1 for d in source_docs if d.document_type.value == "1099_DIV")
-        b_count = sum(1 for d in source_docs if d.document_type.value == "1099_B")
+        w2_count = sum(1 for d in source_docs if get_enum_value(d.document_type) == "W2")
+        int_count = sum(1 for d in source_docs if get_enum_value(d.document_type) == "1099_INT")
+        div_count = sum(1 for d in source_docs if get_enum_value(d.document_type) == "1099_DIV")
+        b_count = sum(1 for d in source_docs if get_enum_value(d.document_type) == "1099_B")
 
         # Check for missing W-2s
         if w2_count > 0:
             total_wages = sum(
                 (d.extracted_data.get("box_1", 0) or 0)
                 for d in source_docs
-                if d.document_type.value == "W2"
+                if get_enum_value(d.document_type) == "W2"
             )
             # Look for wages amount in return text (basic check)
             wages_str = f"${total_wages:,.0f}"

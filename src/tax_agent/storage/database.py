@@ -40,11 +40,13 @@ class TaxDatabase:
 
             conn = sqlite3_encrypted.connect(str(self.db_path))
             conn.execute(f"PRAGMA key = '{self._password}'")
+            # Use sqlcipher3's Row class for compatibility
+            conn.row_factory = sqlite3_encrypted.Row
         except ImportError:
             # Fall back to regular sqlite (unencrypted) for development
             conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
 
-        conn.row_factory = sqlite3.Row
         return conn
 
     @contextmanager
@@ -183,7 +185,7 @@ class TaxDatabase:
             cursor = conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
             return cursor.rowcount > 0
 
-    def _row_to_document(self, row: sqlite3.Row) -> TaxDocument:
+    def _row_to_document(self, row: Any) -> TaxDocument:
         """Convert a database row to a TaxDocument."""
         return TaxDocument(
             id=row["id"],
@@ -253,6 +255,87 @@ class TaxDatabase:
             ).fetchall()
 
             return {row["document_type"]: row["count"] for row in rows}
+
+    # Review operations
+    def save_review(self, review: "TaxReturnReview") -> None:
+        """Save a tax return review to the database."""
+        from tax_agent.models.returns import TaxReturnReview
+
+        # Include overall_assessment and counts in summary data
+        summary_data = review.return_summary.model_dump()
+        summary_data["overall_assessment"] = review.overall_assessment
+        summary_data["errors_count"] = review.errors_count
+        summary_data["warnings_count"] = review.warnings_count
+        summary_data["suggestions_count"] = review.suggestions_count
+        summary_data["estimated_additional_refund"] = review.estimated_additional_refund
+
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO review_results
+                (id, tax_year, return_type, summary_data, findings, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review.id,
+                    review.return_summary.tax_year,
+                    review.return_summary.return_type,
+                    json.dumps(summary_data, default=str),
+                    json.dumps([f.model_dump() for f in review.findings], default=str),
+                    review.reviewed_at.isoformat(),
+                ),
+            )
+
+    def get_reviews(self, tax_year: int | None = None) -> list[dict]:
+        """Get saved reviews, optionally filtered by tax year."""
+        with self._connection() as conn:
+            if tax_year:
+                rows = conn.execute(
+                    "SELECT * FROM review_results WHERE tax_year = ? ORDER BY created_at DESC",
+                    (tax_year,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM review_results ORDER BY created_at DESC"
+                ).fetchall()
+
+            return [
+                {
+                    "id": row["id"],
+                    "tax_year": row["tax_year"],
+                    "return_type": row["return_type"],
+                    "summary": json.loads(row["summary_data"]),
+                    "findings": json.loads(row["findings"]),
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+
+    def get_review(self, review_id: str) -> dict | None:
+        """Get a specific review by ID."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM review_results WHERE id = ? OR id LIKE ?",
+                (review_id, f"{review_id}%")
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return {
+                "id": row["id"],
+                "tax_year": row["tax_year"],
+                "return_type": row["return_type"],
+                "summary": json.loads(row["summary_data"]),
+                "findings": json.loads(row["findings"]),
+                "created_at": row["created_at"],
+            }
+
+    def delete_review(self, review_id: str) -> bool:
+        """Delete a review by ID."""
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM review_results WHERE id = ?", (review_id,))
+            return cursor.rowcount > 0
 
 
 # Global database instance

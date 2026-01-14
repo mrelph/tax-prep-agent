@@ -104,7 +104,7 @@ Enter your state code (e.g., CA, NY, TX) or 'skip' to set later: CA
 Setup Complete!
 Data directory: /Users/you/.tax-agent/data
 AI Provider: anthropic
-Model: claude-sonnet-4-5-20250514
+Model: claude-3-5-sonnet
 Tax Year: 2024
 State: CA
 
@@ -133,7 +133,7 @@ tax-agent status
 │ Tax Year         │ 2024                                 │
 │ State            │ CA                                   │
 │ AI Provider      │ anthropic                            │
-│ Model            │ claude-sonnet-4-5-20250514           │
+│ Model            │ claude-3-5-sonnet           │
 │ API Key          │ Configured                           │
 │ Data Directory   │ /Users/you/.tax-agent/data           │
 └──────────────────────────────────────────────────────────┘
@@ -873,7 +873,7 @@ tax-agent config get
 │ state            │ CA                           │
 │ filing_status    │ single                       │
 │ ai_provider      │ anthropic                    │
-│ model            │ claude-sonnet-4-5-20250514   │
+│ model            │ claude-3-5-sonnet   │
 │ aws_region       │ us-east-1                    │
 │ ocr_engine       │ pytesseract                  │
 │ auto_redact_ssn  │ True                         │
@@ -1210,7 +1210,7 @@ tax-agent config set model claude-opus-4-20250514
 tax-agent review ~/taxes/complex_return.pdf
 
 # Switch back to Sonnet for routine tasks
-tax-agent config set model claude-sonnet-4-5-20250514
+tax-agent config set model claude-3-5-sonnet
 ```
 
 ### Disabling SSN Redaction
@@ -1380,7 +1380,7 @@ cat ~/.tax-agent/config.json
 
 ```bash
 # Use Sonnet (default) for cost-effective analysis
-tax-agent config set model claude-sonnet-4-5-20250514
+tax-agent config set model claude-3-5-sonnet
 
 # Reserve Opus for complex reviews only
 tax-agent config set model claude-opus-4-20250514

@@ -244,7 +244,7 @@ def review_tax_return(self, return_text: str, source_docs: str) -> str
 ```
 
 **Model Selection:**
-- Default: `claude-sonnet-4-5-20250514` (balanced speed/cost/accuracy)
+- Default: `claude-3-5-sonnet` (balanced speed/cost/accuracy)
 - High-accuracy: `claude-opus-4-20250514` (slower, more expensive)
 - Configurable via settings
 
@@ -510,7 +510,7 @@ r'\b\d{2}-\d{7}\b'        # 12-3456789
   "state": "CA",
   "filing_status": "single",
   "ai_provider": "anthropic",
-  "model": "claude-sonnet-4-5-20250514",
+  "model": "claude-3-5-sonnet",
   "aws_region": "us-east-1",
   "ocr_engine": "pytesseract",
   "auto_redact_ssn": true,
@@ -855,12 +855,12 @@ class TaxAgent:
 
 ```python
 ANTHROPIC_MODELS = {
-    "claude-sonnet-4-5-20250514": "claude-sonnet-4-5-20250514",
+    "claude-3-5-sonnet": "claude-3-5-sonnet",
     "claude-opus-4-20250514": "claude-opus-4-20250514",
 }
 
 BEDROCK_MODELS = {
-    "claude-sonnet-4-5-20250514": "anthropic.claude-sonnet-4-5-20250514-v1:0",
+    "claude-3-5-sonnet": "anthropic.claude-3-5-sonnet-v1:0",
     "claude-opus-4-20250514": "anthropic.claude-opus-4-20250514-v1:0",
 }
 ```

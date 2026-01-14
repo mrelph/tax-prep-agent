@@ -1,5 +1,6 @@
 """Tax implication analysis module."""
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,17 @@ from tax_agent.config import get_config
 from tax_agent.models.documents import DocumentType, TaxDocument
 from tax_agent.models.taxpayer import FilingStatus, TaxpayerProfile
 from tax_agent.storage.database import get_database
+from tax_agent.utils import get_enum_value
+
+
+def _get_sdk_agent():
+    """Get SDK agent if available and enabled."""
+    config = get_config()
+    if config.use_agent_sdk:
+        from tax_agent.agent_sdk import get_sdk_agent, sdk_available
+        if sdk_available():
+            return get_sdk_agent()
+    return None
 
 
 def load_tax_rules(tax_year: int = 2024) -> dict[str, Any]:
@@ -299,16 +311,24 @@ class TaxAnalyzer:
         """Count documents by type."""
         counts: dict[str, int] = {}
         for doc in documents:
-            doc_type = doc.document_type.value
+            doc_type = get_enum_value(doc.document_type)
             counts[doc_type] = counts.get(doc_type, 0) + 1
         return counts
 
-    def generate_ai_analysis(self, taxpayer: TaxpayerProfile | None = None) -> str:
+    def generate_ai_analysis(
+        self,
+        taxpayer: TaxpayerProfile | None = None,
+        use_sdk: bool | None = None,
+    ) -> str:
         """
         Generate AI-powered analysis using Claude.
 
+        When Agent SDK is enabled, this method can use tools to verify
+        data against source documents and look up current IRS rules.
+
         Args:
             taxpayer: Taxpayer profile
+            use_sdk: Override config.use_agent_sdk (None = use config)
 
         Returns:
             Natural language analysis
@@ -319,8 +339,9 @@ class TaxAnalyzer:
 
         # Build document summary for Claude
         doc_summaries = []
+        source_dir = None
         for doc in documents:
-            summary = f"- {doc.document_type.value} from {doc.issuer_name}"
+            summary = f"- {get_enum_value(doc.document_type)} from {doc.issuer_name}"
             if doc.extracted_data:
                 if doc.document_type == DocumentType.W2:
                     wages = doc.extracted_data.get("box_1", 0)
@@ -338,12 +359,16 @@ class TaxAnalyzer:
                     summary += f": Total proceeds ${total_proceeds:,.2f}"
             doc_summaries.append(summary)
 
+            # Track source directory for SDK tool access
+            if doc.file_path and source_dir is None:
+                source_dir = Path(doc.file_path).parent
+
         documents_text = "\n".join(doc_summaries)
 
         # Build taxpayer info
         if taxpayer:
             taxpayer_text = f"""
-Filing Status: {taxpayer.filing_status.value}
+Filing Status: {get_enum_value(taxpayer.filing_status)}
 State: {taxpayer.state}
 Dependents: {taxpayer.num_dependents}
 Self-employed: {taxpayer.is_self_employed}
@@ -356,6 +381,21 @@ State: {config.state or 'Not specified'}
 Filing Status: {config.get('filing_status', 'Not specified')}
 """
 
+        # Determine whether to use SDK
+        config = get_config()
+        should_use_sdk = use_sdk if use_sdk is not None else config.use_agent_sdk
+
+        if should_use_sdk:
+            sdk_agent = _get_sdk_agent()
+            if sdk_agent:
+                # Use SDK with tool access for enhanced analysis
+                return sdk_agent.analyze_documents(
+                    documents_text,
+                    taxpayer_text,
+                    source_dir=source_dir,
+                )
+
+        # Fall back to legacy agent
         agent = get_agent()
         return agent.analyze_tax_implications(documents_text, taxpayer_text)
 

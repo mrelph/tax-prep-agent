@@ -60,7 +60,7 @@ def __init__(self, model: str | None = None) -> None:
 
     Args:
         model: Claude model to use. Defaults to config setting.
-               Options: "claude-sonnet-4-5-20250514",
+               Options: "claude-3-5-sonnet",
                        "claude-opus-4-20250514"
 
     Raises:

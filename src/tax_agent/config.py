@@ -1,6 +1,7 @@
 """Configuration management for the tax agent."""
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -55,11 +56,15 @@ class Config:
             "state": None,
             "filing_status": None,
             "ai_provider": AI_PROVIDER_ANTHROPIC,  # "anthropic" or "aws_bedrock"
-            "model": "claude-sonnet-4-5-20250514",
+            "model": "claude-sonnet-4-5",
             "aws_region": "us-east-1",
             "ocr_engine": "pytesseract",
             "auto_redact_ssn": True,
             "initialized": False,
+            # Agent SDK settings
+            "use_agent_sdk": False,  # Opt-in to new SDK features
+            "agent_sdk_max_turns": 10,  # Maximum agentic turns
+            "agent_sdk_allow_web": True,  # Allow web search/fetch tools
         }
 
     @property
@@ -88,7 +93,12 @@ class Config:
         self._save()
 
     def get_api_key(self) -> str | None:
-        """Get the Anthropic API key from the system keyring."""
+        """Get the Anthropic API key from environment or keyring."""
+        # Check environment variable first
+        env_key = os.environ.get("ANTHROPIC_API_KEY")
+        if env_key:
+            return env_key
+        # Fall back to keyring
         return keyring.get_password(KEYRING_SERVICE, KEYRING_API_KEY)
 
     def set_api_key(self, api_key: str) -> None:
@@ -96,7 +106,13 @@ class Config:
         keyring.set_password(KEYRING_SERVICE, KEYRING_API_KEY, api_key)
 
     def get_aws_credentials(self) -> tuple[str | None, str | None]:
-        """Get AWS credentials from the system keyring."""
+        """Get AWS credentials from environment or system keyring."""
+        # Check environment variables first (standard AWS env vars)
+        env_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        env_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        if env_access_key and env_secret_key:
+            return env_access_key, env_secret_key
+        # Fall back to keyring
         access_key = keyring.get_password(KEYRING_SERVICE, KEYRING_AWS_ACCESS_KEY)
         secret_key = keyring.get_password(KEYRING_SERVICE, KEYRING_AWS_SECRET_KEY)
         return access_key, secret_key
@@ -201,6 +217,36 @@ class Config:
     def state(self, state: str) -> None:
         """Set the state of residence."""
         self.set("state", state.upper())
+
+    @property
+    def use_agent_sdk(self) -> bool:
+        """Check if Agent SDK features are enabled."""
+        return self._config.get("use_agent_sdk", False)
+
+    @use_agent_sdk.setter
+    def use_agent_sdk(self, enabled: bool) -> None:
+        """Enable or disable Agent SDK features."""
+        self.set("use_agent_sdk", enabled)
+
+    @property
+    def agent_sdk_max_turns(self) -> int:
+        """Get maximum agentic turns for SDK operations."""
+        return self._config.get("agent_sdk_max_turns", 10)
+
+    @agent_sdk_max_turns.setter
+    def agent_sdk_max_turns(self, turns: int) -> None:
+        """Set maximum agentic turns."""
+        self.set("agent_sdk_max_turns", max(1, min(turns, 50)))
+
+    @property
+    def agent_sdk_allow_web(self) -> bool:
+        """Check if web tools are allowed for Agent SDK."""
+        return self._config.get("agent_sdk_allow_web", True)
+
+    @agent_sdk_allow_web.setter
+    def agent_sdk_allow_web(self, allowed: bool) -> None:
+        """Enable or disable web tools for Agent SDK."""
+        self.set("agent_sdk_allow_web", allowed)
 
     def to_dict(self) -> dict[str, Any]:
         """Return configuration as a dictionary (excluding secrets)."""

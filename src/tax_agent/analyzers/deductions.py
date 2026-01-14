@@ -1,5 +1,6 @@
 """Deduction finder and tax optimization module with user interview."""
 
+from pathlib import Path
 from typing import Any
 
 from tax_agent.agent import get_agent
@@ -7,6 +8,17 @@ from tax_agent.config import get_config
 from tax_agent.models.documents import DocumentType, TaxDocument
 from tax_agent.models.taxpayer import FilingStatus, TaxpayerProfile
 from tax_agent.storage.database import get_database
+from tax_agent.utils import get_enum_value
+
+
+def _get_sdk_agent():
+    """Get SDK agent if available and enabled."""
+    config = get_config()
+    if config.use_agent_sdk:
+        from tax_agent.agent_sdk import get_sdk_agent, sdk_available
+        if sdk_available():
+            return get_sdk_agent()
+    return None
 
 
 class TaxOptimizer:
@@ -15,6 +27,11 @@ class TaxOptimizer:
 
     Identifies tax-saving opportunities through intelligent questioning
     and analysis of the user's situation.
+
+    When Agent SDK is enabled, can use tools to:
+    - Read source documents for verification
+    - Look up current IRS rules and limits
+    - Calculate tax scenarios with built-in tax tools
     """
 
     def __init__(self, tax_year: int | None = None):
@@ -22,7 +39,27 @@ class TaxOptimizer:
         config = get_config()
         self.tax_year = tax_year or config.tax_year
         self.db = get_database()
-        self.agent = get_agent()
+        self.config = config
+        self._agent = None
+        self._sdk_agent = None
+
+    @property
+    def agent(self):
+        """Get legacy agent (lazy initialization)."""
+        if self._agent is None:
+            self._agent = get_agent()
+        return self._agent
+
+    @property
+    def sdk_agent(self):
+        """Get SDK agent if enabled (lazy initialization)."""
+        if self._sdk_agent is None and self.config.use_agent_sdk:
+            self._sdk_agent = _get_sdk_agent()
+        return self._sdk_agent
+
+    def _use_sdk(self) -> bool:
+        """Check if SDK should be used."""
+        return self.config.use_agent_sdk and self.sdk_agent is not None
 
     def get_interview_questions(
         self,
@@ -213,14 +250,21 @@ Provide a comprehensive tax analysis."""
         documents: list[TaxDocument] | None = None,
         interview_answers: dict[str, Any] | None = None,
         taxpayer: TaxpayerProfile | None = None,
+        use_sdk: bool | None = None,
     ) -> dict[str, Any]:
         """
         Find applicable deductions based on documents and interview.
+
+        When Agent SDK is enabled, this method can:
+        - Use web tools to verify current IRS limits
+        - Read source documents to verify amounts
+        - Use tax calculation tools for accurate estimates
 
         Args:
             documents: Collected tax documents
             interview_answers: Answers from user interview
             taxpayer: Taxpayer profile
+            use_sdk: Override config.use_agent_sdk (None = use config)
 
         Returns:
             Dictionary with found deductions and recommendations
@@ -231,6 +275,21 @@ Provide a comprehensive tax analysis."""
         doc_summary = self._build_document_summary(documents)
         answers_summary = self._format_previous_answers(interview_answers or {})
         profile_summary = self._format_taxpayer_profile(taxpayer)
+
+        # Get source directory for SDK tool access
+        source_dir = None
+        for doc in documents:
+            if doc.file_path:
+                source_dir = Path(doc.file_path).parent
+                break
+
+        # Check if we should use SDK
+        should_use_sdk = use_sdk if use_sdk is not None else self._use_sdk()
+
+        if should_use_sdk and self.sdk_agent:
+            return self._find_deductions_with_sdk(
+                doc_summary, answers_summary, profile_summary, source_dir
+            )
 
         system = """You are an AGGRESSIVE tax optimization expert. Your mission is to find EVERY POSSIBLE way to LEGALLY reduce this taxpayer's tax burden. Be exhaustive and creative.
 
@@ -351,6 +410,79 @@ Find all applicable deductions and credits."""
         except json.JSONDecodeError:
             return {"error": "Failed to parse deductions", "raw_response": response}
 
+    def _find_deductions_with_sdk(
+        self,
+        doc_summary: str,
+        answers_summary: str,
+        profile_summary: str,
+        source_dir: Path | None,
+    ) -> dict[str, Any]:
+        """
+        Find deductions using Agent SDK with tool access.
+
+        The SDK agent can verify amounts against source documents and
+        look up current IRS limits via web tools.
+        """
+        prompt = f"""Find ALL applicable tax deductions and credits for this taxpayer.
+
+You have access to tools to:
+- Read source documents to verify amounts
+- Search the web for current IRS limits and rules
+- Calculate tax scenarios
+
+Be AGGRESSIVE - find every legal way to reduce their tax burden.
+
+Documents:
+{doc_summary}
+
+Interview Answers:
+{answers_summary}
+
+Taxpayer Profile:
+{profile_summary}
+
+For EACH opportunity found, provide:
+- Name and description
+- Estimated tax savings (not just deduction amount)
+- Action required to claim
+- Documentation needed
+
+Return a JSON object with:
+- "recommended_deductions": [{{name, estimated_value, action_needed, documentation}}]
+- "recommended_credits": [{{name, estimated_value, eligibility, action_needed}}]
+- "standard_vs_itemized": {{recommendation, reasoning}}
+- "estimated_total_savings": number
+- "action_items": ["step1", "step2", ...]
+- "warnings": ["concern1", ...]"""
+
+        try:
+            result = self.sdk_agent.interactive_query(
+                prompt,
+                context={"tax_year": self.tax_year},
+                source_dir=source_dir,
+            )
+
+            # Parse JSON from response
+            import json
+            result = result.strip()
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+
+            # Find JSON object in response
+            json_start = result.find("{")
+            json_end = result.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                return json.loads(result[json_start:json_end])
+
+            return {"error": "No JSON found in SDK response", "raw_response": result}
+        except Exception as e:
+            # Fall back to legacy method on error
+            import logging
+            logging.warning(f"SDK deduction finding failed: {e}")
+            return {"error": str(e), "fallback": "Use find_deductions with use_sdk=False"}
+
     def _build_document_summary(self, documents: list[TaxDocument]) -> str:
         """Build a summary of documents for Claude."""
         if not documents:
@@ -358,7 +490,7 @@ Find all applicable deductions and credits."""
 
         lines = []
         for doc in documents:
-            line = f"- {doc.document_type.value} from {doc.issuer_name}"
+            line = f"- {get_enum_value(doc.document_type)} from {doc.issuer_name}"
             data = doc.extracted_data
 
             if doc.document_type == DocumentType.W2:
@@ -410,7 +542,7 @@ Find all applicable deductions and credits."""
             return f"""Filing Status: {config.get('filing_status', 'Not specified')}
 State: {config.state or 'Not specified'}"""
 
-        return f"""Filing Status: {profile.filing_status.value}
+        return f"""Filing Status: {get_enum_value(profile.filing_status)}
 State: {profile.state}
 Dependents: {profile.num_dependents}
 Age 65+: {profile.is_65_or_older}

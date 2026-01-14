@@ -5,16 +5,25 @@ from tax_agent.config import AI_PROVIDER_ANTHROPIC, AI_PROVIDER_AWS_BEDROCK, get
 # Model mapping for different providers
 # Anthropic API uses direct model IDs, Bedrock uses ARN-style IDs
 ANTHROPIC_MODELS = {
-    "claude-sonnet-4-5-20250514": "claude-sonnet-4-5-20250514",
-    "claude-sonnet-4-20250514": "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514": "claude-opus-4-20250514",
+    "claude-opus-4-5": "claude-opus-4-5-20251101",
+    "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+    "claude-3-5-sonnet": "claude-3-5-sonnet-20241022",
+    "claude-3-opus": "claude-3-opus-20240229",
+    "claude-3-sonnet": "claude-3-sonnet-20240229",
+    "claude-3-haiku": "claude-3-haiku-20240307",
 }
 
 BEDROCK_MODELS = {
-    "claude-sonnet-4-5-20250514": "anthropic.claude-sonnet-4-5-20250514-v1:0",
-    "claude-sonnet-4-20250514": "anthropic.claude-sonnet-4-20250514-v1:0",
-    "claude-opus-4-20250514": "anthropic.claude-opus-4-20250514-v1:0",
+    "claude-opus-4-5": "anthropic.claude-opus-4-5-20251101-v1:0",
+    "claude-sonnet-4-5": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "claude-3-5-sonnet": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "claude-3-opus": "anthropic.claude-3-opus-20240229-v1:0",
+    "claude-3-sonnet": "anthropic.claude-3-sonnet-20240229-v1:0",
+    "claude-3-haiku": "anthropic.claude-3-haiku-20240307-v1:0",
 }
+
+# Default model
+DEFAULT_MODEL = "claude-sonnet-4-5"
 
 
 class TaxAgent:
@@ -33,8 +42,8 @@ class TaxAgent:
         self.provider = config.ai_provider
         self.config = config
 
-        # Default to Claude Sonnet 4.5
-        base_model = model or config.get("model", "claude-sonnet-4-5-20250514")
+        # Default to Claude 3.5 Sonnet
+        base_model = model or config.get("model", DEFAULT_MODEL)
 
         if self.provider == AI_PROVIDER_AWS_BEDROCK:
             self._init_bedrock(base_model)
@@ -112,10 +121,45 @@ class TaxAgent:
         """
         system = """You are a tax document classifier. Analyze the provided text and identify what type of tax document it is.
 
+DOCUMENT CATEGORIES:
+
+SOURCE DOCUMENTS (used to prepare tax returns):
+- W2: Wage and Tax Statement from employer
+- W2_G: Gambling winnings
+- 1099_INT: Interest income from banks/investments
+- 1099_DIV: Dividend income
+- 1099_B: Brokerage/stock sale transactions
+- 1099_NEC: Non-employee compensation (freelance/contract)
+- 1099_MISC: Miscellaneous income
+- 1099_R: Retirement distributions (401k, IRA, pension)
+- 1099_G: Government payments (unemployment, state tax refunds)
+- 1099_K: Payment card/third-party network transactions
+- 1098: Mortgage interest statement
+- 1098_T: Tuition statement
+- 1098_E: Student loan interest
+- 5498: IRA contribution information
+- K1: Partnership/S-corp income (Schedule K-1)
+
+COMPLETED TAX RETURNS (for review/verification):
+- 1040: Federal individual income tax return (Form 1040)
+- 1040_SR: Federal return for seniors
+- 1040_NR: Non-resident alien return
+- 1040_X: Amended federal return
+- SCHEDULE_A: Itemized deductions
+- SCHEDULE_B: Interest and ordinary dividends
+- SCHEDULE_C: Profit or loss from business
+- SCHEDULE_D: Capital gains and losses
+- SCHEDULE_E: Supplemental income (rental, royalty, S-corp)
+- SCHEDULE_SE: Self-employment tax
+- STATE_RETURN: State income tax return (any state)
+
+Use UNKNOWN only if the document doesn't match any category above.
+
 Respond with a JSON object containing:
-- document_type: One of: W2, 1099_INT, 1099_DIV, 1099_B, 1099_NEC, 1099_MISC, 1099_R, 1099_G, 1099_K, 1098, 1098_T, 1098_E, 5498, K1, UNKNOWN
+- document_type: One of the types listed above
+- document_category: Either "SOURCE" or "RETURN" (or "UNKNOWN")
 - confidence: A number from 0 to 1 indicating your confidence
-- issuer_name: The name of the entity that issued this document (employer, bank, etc.)
+- issuer_name: The name of the entity that issued this document (employer, bank, preparer, or "IRS" for federal returns)
 - tax_year: The tax year this document is for (e.g., 2024)
 - reasoning: Brief explanation of why you classified it this way
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class DocumentType(str, Enum):
     """Types of tax documents supported."""
 
+    # Source documents (used to prepare returns)
     W2 = "W2"
     W2_G = "W2_G"  # Gambling winnings
     FORM_1099_INT = "1099_INT"  # Interest income
@@ -25,7 +26,40 @@ class DocumentType(str, Enum):
     FORM_1098_E = "1098_E"  # Student loan interest
     FORM_5498 = "5498"  # IRA contributions
     K1 = "K1"  # Partnership/S-corp income
+
+    # Completed tax returns (for review)
+    FORM_1040 = "1040"  # Federal individual income tax return
+    FORM_1040_SR = "1040_SR"  # Federal return for seniors
+    FORM_1040_NR = "1040_NR"  # Non-resident alien return
+    FORM_1040_X = "1040_X"  # Amended return
+    SCHEDULE_A = "SCHEDULE_A"  # Itemized deductions
+    SCHEDULE_B = "SCHEDULE_B"  # Interest and dividends
+    SCHEDULE_C = "SCHEDULE_C"  # Business income
+    SCHEDULE_D = "SCHEDULE_D"  # Capital gains
+    SCHEDULE_E = "SCHEDULE_E"  # Rental/royalty income
+    SCHEDULE_SE = "SCHEDULE_SE"  # Self-employment tax
+    STATE_RETURN = "STATE_RETURN"  # State income tax return
+
     UNKNOWN = "UNKNOWN"
+
+
+# Helper to categorize document types
+SOURCE_DOCUMENTS = {
+    DocumentType.W2, DocumentType.W2_G,
+    DocumentType.FORM_1099_INT, DocumentType.FORM_1099_DIV, DocumentType.FORM_1099_B,
+    DocumentType.FORM_1099_NEC, DocumentType.FORM_1099_MISC, DocumentType.FORM_1099_R,
+    DocumentType.FORM_1099_G, DocumentType.FORM_1099_K,
+    DocumentType.FORM_1098, DocumentType.FORM_1098_T, DocumentType.FORM_1098_E,
+    DocumentType.FORM_5498, DocumentType.K1,
+}
+
+TAX_RETURNS = {
+    DocumentType.FORM_1040, DocumentType.FORM_1040_SR, DocumentType.FORM_1040_NR,
+    DocumentType.FORM_1040_X,
+    DocumentType.SCHEDULE_A, DocumentType.SCHEDULE_B, DocumentType.SCHEDULE_C,
+    DocumentType.SCHEDULE_D, DocumentType.SCHEDULE_E, DocumentType.SCHEDULE_SE,
+    DocumentType.STATE_RETURN,
+}
 
 
 class TaxDocument(BaseModel):
