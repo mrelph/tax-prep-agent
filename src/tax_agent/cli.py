@@ -525,7 +525,20 @@ def _start_interactive_mode() -> None:
             continue
 
         # Process the input (handles both slash commands and natural language)
-        with console.status("[bold green]Thinking..."):
+        # Fun thinking spinner with tax-themed messages
+        import random
+        thinking_messages = [
+            "Crunching numbers...",
+            "Consulting the tax code...",
+            "Finding deductions...",
+            "Maximizing your refund...",
+            "Reading IRS publications...",
+            "Checking for credits...",
+            "Analyzing your situation...",
+            "Looking for savings...",
+        ]
+        spinner_msg = random.choice(thinking_messages)
+        with console.status(f"[bold cyan]{spinner_msg}[/bold cyan]", spinner="dots12"):
             response = advisor.chat(user_input)
 
         # Render response as markdown for better formatting
