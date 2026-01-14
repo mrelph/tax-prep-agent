@@ -1,5 +1,6 @@
 """Tax return error checking and review."""
 
+import base64
 import json
 import uuid
 from datetime import datetime
@@ -25,10 +26,11 @@ class ReturnReviewer:
 
     def __init__(self, tax_year: int | None = None):
         """Initialize the reviewer."""
-        config = get_config()
-        self.tax_year = tax_year or config.tax_year
+        self.config = get_config()
+        self.tax_year = tax_year or self.config.tax_year
         self.db = get_database()
         self.agent = get_agent()
+        self._last_review_text: str | None = None  # Store for chat context
 
     def review_return(self, return_path: str | Path) -> TaxReturnReview:
         """
@@ -44,13 +46,8 @@ class ReturnReviewer:
         if not return_path.exists():
             raise FileNotFoundError(f"Return file not found: {return_path}")
 
-        # Extract text from the return
-        return_text = extract_text_with_ocr(return_path)
-
         # Get source documents for comparison
         source_docs = self.db.get_documents(tax_year=self.tax_year)
-
-        # Build source document summary
         source_summary = self._build_source_summary(source_docs)
 
         # Get user memories for personalized review
@@ -66,13 +63,30 @@ class ReturnReviewer:
             source_documents_checked=[doc.id for doc in source_docs],
         )
 
-        # Run rule-based checks first
-        rule_findings = self._run_rule_based_checks(source_docs, return_text)
-        for finding in rule_findings:
-            review.add_finding(finding)
+        # Use Vision API for review (preferred) or fall back to OCR
+        use_vision = self.config.get("use_vision", True)
 
-        # Run AI-powered review with taxpayer context
-        ai_findings_text = self._run_ai_review(return_text, source_summary, taxpayer_context)
+        if use_vision:
+            # Use Claude Vision to analyze the return directly
+            ai_findings_text = self._review_with_vision(
+                return_path, source_summary, taxpayer_context
+            )
+        else:
+            # Legacy OCR-based review
+            return_text = extract_text_with_ocr(return_path)
+
+            # Run rule-based checks
+            rule_findings = self._run_rule_based_checks(source_docs, return_text)
+            for finding in rule_findings:
+                review.add_finding(finding)
+
+            # Run AI review on extracted text
+            ai_findings_text = self._run_ai_review(return_text, source_summary, taxpayer_context)
+
+        # Store for chat context
+        self._last_review_text = ai_findings_text
+
+        # Parse AI findings
         ai_findings = self._parse_ai_findings(ai_findings_text)
         for finding in ai_findings:
             review.add_finding(finding)
@@ -94,7 +108,77 @@ class ReturnReviewer:
         else:
             review.overall_assessment = "Return appears to be accurate with no issues found."
 
+        # Save review to database for later reference
+        self.db.save_review(review)
+
         return review
+
+    def _review_with_vision(
+        self,
+        return_path: Path,
+        source_summary: str,
+        taxpayer_context: str,
+    ) -> str:
+        """
+        Review a tax return using Claude Vision.
+
+        Analyzes the return images directly for more accurate review.
+        """
+        # Prepare images from PDF
+        images_data = self.agent._prepare_images_for_vision(return_path)
+
+        # Build comprehensive review prompt
+        system = f"""You are an expert tax return reviewer. Analyze this tax return for:
+
+1. **ERRORS** - Mathematical mistakes, incorrect entries, missing required fields
+2. **MISSED DEDUCTIONS** - Deductions/credits that could have been claimed
+3. **OPTIMIZATION OPPORTUNITIES** - Ways to reduce tax liability
+4. **INCONSISTENCIES** - Numbers that don't match or add up
+
+{f"TAXPAYER CONTEXT:{chr(10)}{taxpayer_context}" if taxpayer_context else ""}
+
+{f"SOURCE DOCUMENTS:{chr(10)}{source_summary}" if source_summary != "No source documents available for comparison." else ""}
+
+For each finding, use this format:
+**ERROR**: [title]
+- Description of the issue
+- Impact: $X (if calculable)
+- Recommendation: What to do
+
+**WARNING**: [title]
+- Description
+- Recommendation
+
+**SUGGESTION**: [title]
+- Description
+- Potential savings: $X
+
+Be thorough but only report genuine issues. Don't fabricate problems."""
+
+        # Build message with images (first 5 pages)
+        content = []
+        for img_data in images_data[:5]:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": img_data["media_type"],
+                    "data": img_data["data"],
+                },
+            })
+        content.append({
+            "type": "text",
+            "text": "Review this tax return thoroughly. Identify all errors, missed deductions, and optimization opportunities.",
+        })
+
+        response = self.agent.client.messages.create(
+            model=self.agent.model,
+            max_tokens=4000,
+            system=system,
+            messages=[{"role": "user", "content": content}],
+        )
+
+        return response.content[0].text
 
     def _build_source_summary(self, documents: list[TaxDocument]) -> str:
         """Build a summary of source documents for comparison."""

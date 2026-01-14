@@ -704,9 +704,25 @@ def cmd_review(args: list[str], context: dict) -> str:
         reviewer = ReturnReviewer(year)
         review_result = reviewer.review_return(file_path)
 
-        # Save review context to session
+        # Save review context to session for chat follow-up
         session.update_context("return_file", str(file_path))
         session.update_context("findings_count", len(review_result.findings))
+        session.update_context("review_id", review_result.id)
+        session.update_context("overall_assessment", review_result.overall_assessment)
+
+        # Store the raw review text for chat context
+        if reviewer._last_review_text:
+            session.update_context("review_analysis", reviewer._last_review_text)
+
+        # Store findings summary for quick reference
+        findings_summary = []
+        for f in review_result.findings:
+            findings_summary.append({
+                "severity": f.severity.value,
+                "title": f.title,
+                "description": f.description[:200],
+            })
+        session.update_context("findings_summary", findings_summary)
 
         # Build response
         mode_notice = "_Switched to REVIEW mode_\n\n" if was_different_mode else ""

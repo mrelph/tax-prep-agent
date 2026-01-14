@@ -158,6 +158,22 @@ class TaxAdvisorChat:
         except Exception:
             pass  # Memory system optional
 
+        # Add review context if in REVIEW mode
+        if mode == AgentMode.REVIEW:
+            mode_context = self.session.get_mode_context()
+            if mode_context.get("review_analysis"):
+                context_parts.append("")
+                context_parts.append("RECENT TAX RETURN REVIEW:")
+                context_parts.append(f"File: {mode_context.get('return_file', 'Unknown')}")
+                context_parts.append(f"Assessment: {mode_context.get('overall_assessment', 'No assessment')}")
+                context_parts.append("")
+                context_parts.append("Review Analysis:")
+                # Include the full analysis for context
+                analysis = mode_context.get("review_analysis", "")
+                if len(analysis) > 3000:
+                    analysis = analysis[:3000] + "... [truncated]"
+                context_parts.append(analysis)
+
         return "\n".join(context_parts)
 
     def chat(self, user_message: str) -> str:
