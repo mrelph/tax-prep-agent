@@ -9,6 +9,7 @@ from typing import Any, Generator
 
 from tax_agent.config import get_config
 from tax_agent.models.documents import DocumentType, TaxDocument
+from tax_agent.models.memory import Memory, MemoryCategory, MemoryType
 from tax_agent.models.taxpayer import TaxpayerProfile
 
 
@@ -112,6 +113,22 @@ class TaxDatabase:
                     findings TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    memory_type TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tax_year INTEGER,
+                    confidence REAL DEFAULT 1.0,
+                    source TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
+                CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
+                CREATE INDEX IF NOT EXISTS idx_memories_year ON memories(tax_year);
             """)
 
     # Document operations
@@ -336,6 +353,110 @@ class TaxDatabase:
         with self._connection() as conn:
             cursor = conn.execute("DELETE FROM review_results WHERE id = ?", (review_id,))
             return cursor.rowcount > 0
+
+    # Memory operations
+    def save_memory(self, memory: Memory) -> str:
+        """Save a memory to the database. Returns the memory ID."""
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO memories
+                (id, memory_type, category, content, tax_year, confidence, source,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    memory.id,
+                    memory.memory_type,
+                    memory.category,
+                    memory.content,
+                    memory.tax_year,
+                    memory.confidence,
+                    memory.source,
+                    memory.created_at.isoformat(),
+                    memory.updated_at.isoformat(),
+                ),
+            )
+        return memory.id
+
+    def get_memory(self, memory_id: str) -> Memory | None:
+        """Get a memory by ID."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM memories WHERE id = ? OR id LIKE ?",
+                (memory_id, f"{memory_id}%")
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            return self._row_to_memory(row)
+
+    def get_memories(
+        self,
+        memory_type: MemoryType | str | None = None,
+        category: MemoryCategory | str | None = None,
+        tax_year: int | None = None,
+    ) -> list[Memory]:
+        """Get memories with optional filtering."""
+        query = "SELECT * FROM memories WHERE 1=1"
+        params: list[Any] = []
+
+        if memory_type is not None:
+            query += " AND memory_type = ?"
+            params.append(memory_type.value if isinstance(memory_type, MemoryType) else memory_type)
+
+        if category is not None:
+            query += " AND category = ?"
+            params.append(category.value if isinstance(category, MemoryCategory) else category)
+
+        if tax_year is not None:
+            # Include year-agnostic memories (tax_year IS NULL) along with specific year
+            query += " AND (tax_year = ? OR tax_year IS NULL)"
+            params.append(tax_year)
+
+        query += " ORDER BY created_at DESC"
+
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [self._row_to_memory(row) for row in rows]
+
+    def get_all_memories(self) -> list[Memory]:
+        """Get all memories."""
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM memories ORDER BY memory_type, category, created_at DESC"
+            ).fetchall()
+            return [self._row_to_memory(row) for row in rows]
+
+    def delete_memory(self, memory_id: str) -> bool:
+        """Delete a memory by ID (supports partial ID match)."""
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM memories WHERE id = ? OR id LIKE ?",
+                (memory_id, f"{memory_id}%")
+            )
+            return cursor.rowcount > 0
+
+    def clear_memories(self) -> int:
+        """Delete all memories. Returns count of deleted memories."""
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM memories")
+            return cursor.rowcount
+
+    def _row_to_memory(self, row: Any) -> Memory:
+        """Convert a database row to a Memory."""
+        return Memory(
+            id=row["id"],
+            memory_type=MemoryType(row["memory_type"]),
+            category=MemoryCategory(row["category"]),
+            content=row["content"],
+            tax_year=row["tax_year"],
+            confidence=row["confidence"],
+            source=row["source"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
 
 
 # Global database instance

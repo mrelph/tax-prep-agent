@@ -182,19 +182,65 @@ async def execute_slash_command(
 # Command Handlers
 # ============================================================================
 
+def cmd_start(args: list[str], context: dict) -> str:
+    """Guide users through the two main workflows."""
+    from tax_agent.storage.database import get_database
+    from tax_agent.config import get_config
+
+    config = get_config()
+    db = get_database()
+    docs = db.get_documents()
+
+    lines = ["# Tax Agent - Getting Started\n"]
+    lines.append("I can help you with **two main workflows**:\n")
+
+    lines.append("## 1. Prepare a New Tax Return\n")
+    lines.append("Collect your tax documents and I'll analyze your situation.\n")
+    lines.append("```")
+    lines.append("/collect ~/Documents/W2.pdf     # Add your W2")
+    lines.append("/collect ~/Documents/1099.pdf   # Add 1099s")
+    lines.append("/documents                       # See what's collected")
+    lines.append("/analyze                         # Get tax analysis")
+    lines.append("/optimize                        # Find missed deductions")
+    lines.append("```\n")
+
+    lines.append("## 2. Review a Completed Return\n")
+    lines.append("Have a completed tax return? I'll check it for errors.\n")
+    lines.append("```")
+    lines.append("/review ~/Documents/2024_1040.pdf")
+    lines.append("```\n")
+
+    # Show current state
+    lines.append("---\n")
+    lines.append("## Your Current Status\n")
+    lines.append(f"- **Tax Year:** {config.tax_year}")
+    lines.append(f"- **State:** {config.state or 'Not set'}")
+    lines.append(f"- **Documents:** {len(docs)} collected")
+
+    if not docs:
+        lines.append("\n**Next step:** Use `/collect` to add your first document, or `/review` to check a completed return.")
+    else:
+        lines.append("\n**Next step:** Use `/analyze` for a full analysis, or just ask me a question!")
+
+    return "\n".join(lines)
+
+
 def cmd_help(args: list[str], context: dict) -> str:
     """Show available slash commands."""
     commands = list_commands()
 
     lines = ["# Available Slash Commands\n"]
 
+    lines.append("**New here?** Try `/start` for a guided walkthrough.\n")
+
     # Group by category
     categories = {
-        "General": ["help", "status"],
+        "General": ["help", "status", "start"],
         "Documents": ["documents", "collect", "find"],
         "Analysis": ["analyze", "optimize", "chat"],
         "AI Features": ["subagent", "subagents", "validate", "audit", "plan", "review"],
         "Google Drive": ["drive"],
+        "Memory": ["memory", "forget"],
         "Configuration": ["config", "year", "state"],
     }
 
@@ -607,13 +653,13 @@ def cmd_review(args: list[str], context: dict) -> str:
             if errors:
                 lines.append("## Errors (must fix)\n")
                 for f in errors:
-                    impact = f" (${f.estimated_impact:,.0f})" if f.estimated_impact else ""
-                    lines.append(f"- **{f.field}**: {f.description}{impact}")
+                    impact = f" (${f.potential_impact:,.0f})" if f.potential_impact else ""
+                    lines.append(f"- **{f.title}**: {f.description}{impact}")
 
             if warnings:
                 lines.append("\n## Warnings (should verify)\n")
                 for f in warnings:
-                    lines.append(f"- **{f.field}**: {f.description}")
+                    lines.append(f"- **{f.title}**: {f.description}")
 
             if suggestions:
                 lines.append("\n## Suggestions\n")
@@ -943,12 +989,124 @@ def _drive_collect(args: list[str]) -> str:
 
 
 # ============================================================================
+# Memory Commands
+# ============================================================================
+
+def cmd_memory(args: list[str], context: dict) -> str:
+    """View or manage stored memories."""
+    from tax_agent.storage.database import get_database
+    from tax_agent.memory import MemoryManager
+
+    db = get_database()
+    memory_mgr = MemoryManager(db)
+
+    if not args:
+        # Show all memories
+        memories = memory_mgr.get_all_memories()
+
+        if not memories:
+            return (
+                "# Stored Memories\n\n"
+                "No memories stored yet. As we chat, I'll remember important facts about you.\n\n"
+                "You can also manually add memories:\n"
+                "- `/memory add I'm self-employed`\n"
+                "- `/memory add I work from home`"
+            )
+
+        lines = ["# Stored Memories\n"]
+
+        # Group by type
+        from tax_agent.models.memory import MemoryType
+        by_type: dict[str, list] = {}
+        for mem in memories:
+            t = mem.memory_type
+            if t not in by_type:
+                by_type[t] = []
+            by_type[t].append(mem)
+
+        type_labels = {
+            MemoryType.FACT: "Facts",
+            MemoryType.PREFERENCE: "Preferences",
+            MemoryType.INSIGHT: "Insights",
+            MemoryType.DECISION: "Decisions",
+        }
+
+        for mem_type, label in type_labels.items():
+            if mem_type in by_type:
+                lines.append(f"\n## {label}\n")
+                for mem in by_type[mem_type]:
+                    source_tag = " (auto)" if mem.source == "auto" else ""
+                    lines.append(f"- {mem.content} `{mem.id[:8]}`{source_tag}")
+
+        lines.append("\n---")
+        lines.append("Use `/forget <id>` to remove a memory")
+        lines.append("Use `/memory clear` to reset all")
+
+        return "\n".join(lines)
+
+    subcommand = args[0].lower()
+
+    if subcommand == "add":
+        if len(args) < 2:
+            return "Usage: `/memory add <fact to remember>`\n\nExample: `/memory add I'm self-employed`"
+
+        content = " ".join(args[1:])
+        memory = memory_mgr.add_memory(content)
+        return f"✓ Remembered: {memory.content}"
+
+    elif subcommand == "clear":
+        # Require confirmation
+        if "--force" in args or "-f" in args:
+            count = memory_mgr.clear_all_memories()
+            return f"✓ Cleared {count} memories"
+
+        memories = memory_mgr.get_all_memories()
+        count = len(memories)
+        if count == 0:
+            return "No memories to clear."
+
+        return (
+            f"⚠️ **Confirm clear**\n\n"
+            f"This will delete **{count} memories**.\n\n"
+            f"To confirm, run: `/memory clear --force`"
+        )
+
+    else:
+        return f"Unknown subcommand: {subcommand}\n\nUse `/memory` to list, `/memory add` to add, `/memory clear` to reset."
+
+
+def cmd_forget(args: list[str], context: dict) -> str:
+    """Delete a specific memory."""
+    if not args:
+        return "Usage: `/forget <memory_id>`\n\nUse `/memory` to see memory IDs."
+
+    from tax_agent.storage.database import get_database
+    from tax_agent.memory import MemoryManager
+
+    db = get_database()
+    memory_mgr = MemoryManager(db)
+
+    memory_id = args[0]
+
+    # Try to find and show what will be deleted
+    memory = db.get_memory(memory_id)
+    if not memory:
+        return f"✗ Memory not found: {memory_id}"
+
+    if memory_mgr.delete_memory(memory_id):
+        return f"✓ Forgot: {memory.content}"
+    else:
+        return f"✗ Failed to delete memory: {memory_id}"
+
+
+# ============================================================================
 # Register all commands
 # ============================================================================
 
 def _register_all_commands() -> None:
     """Register all slash commands."""
     register_command("help", "Show available commands", cmd_help, ["h", "?"], requires_init=False)
+    register_command("start", "Get started - workflow guide", cmd_start, ["guide", "workflow"], requires_init=False)
     register_command("status", "Show current status", cmd_status, ["s"], requires_init=False)
     register_command("documents", "List or manage documents", cmd_documents, ["docs", "d", "doc"], usage="[list|show|delete]")
     register_command("collect", "Collect a tax document", cmd_collect, ["c"], usage="<file_path>")
@@ -967,6 +1125,9 @@ def _register_all_commands() -> None:
     register_command("chat", "Interactive tax chat", cmd_chat, usage="<question>")
     # Google Drive integration
     register_command("drive", "Google Drive integration", cmd_drive, ["gdrive"], usage="[list|files|collect|auth]")
+    # Memory system
+    register_command("memory", "View or manage memories", cmd_memory, ["mem", "remember"], usage="[add|clear]")
+    register_command("forget", "Delete a specific memory", cmd_forget, usage="<memory_id>")
 
 
 # Auto-register on import

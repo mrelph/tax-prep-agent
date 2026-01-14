@@ -384,12 +384,23 @@ def _start_interactive_mode() -> None:
             return 0
 
     # Print welcome banner
-    rprint(Panel.fit(
-        "[bold blue]Tax Prep Agent[/bold blue]\n\n"
-        "Type [cyan]/help[/cyan] for commands or ask any tax question.\n"
-        "[dim]Tab: autocomplete • ↑↓: history • Ctrl+C: exit[/dim]",
-        title="Interactive Mode"
-    ))
+    doc_count = get_doc_count()
+    if doc_count == 0:
+        welcome_text = (
+            "[bold blue]Tax Prep Agent[/bold blue]\n\n"
+            "[cyan]/start[/cyan] - Guided walkthrough (recommended)\n"
+            "[cyan]/collect[/cyan] - Add tax documents\n"
+            "[cyan]/review[/cyan] - Check a completed return\n"
+            "[dim]Tab: autocomplete • ↑↓: history • Ctrl+C: exit[/dim]"
+        )
+    else:
+        welcome_text = (
+            "[bold blue]Tax Prep Agent[/bold blue]\n\n"
+            f"[dim]{doc_count} document{'s' if doc_count != 1 else ''} collected[/dim]\n"
+            "Ask a question, or try [cyan]/analyze[/cyan] • [cyan]/help[/cyan]\n"
+            "[dim]Tab: autocomplete • ↑↓: history • Ctrl+C: exit[/dim]"
+        )
+    rprint(Panel.fit(welcome_text, title="Interactive Mode"))
     rprint("")
 
     # Set up prompt with Claude Code-style features

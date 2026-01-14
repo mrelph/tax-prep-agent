@@ -54,7 +54,7 @@ class TaxAdvisorChat:
         return self.config.use_agent_sdk and self.sdk_agent is not None
 
     def _build_context(self) -> str:
-        """Build context from collected documents and profile."""
+        """Build context from collected documents, profile, and memories."""
         documents = self.db.get_documents(tax_year=self.tax_year)
 
         context_parts = [
@@ -83,6 +83,20 @@ class TaxAdvisorChat:
                     self._source_dir = Path(doc.file_path).parent
         else:
             context_parts.append("- No documents collected yet")
+
+        # Add memories about the user
+        try:
+            from tax_agent.memory import MemoryManager
+            memory_mgr = MemoryManager(self.db)
+            memories = memory_mgr.get_relevant_memories(tax_year=self.tax_year)
+            if memories:
+                memory_context = memory_mgr.format_memories_for_context(memories)
+                if memory_context:
+                    context_parts.append("")
+                    context_parts.append("WHAT I REMEMBER ABOUT YOU:")
+                    context_parts.append(memory_context)
+        except Exception:
+            pass  # Memory system optional
 
         return "\n".join(context_parts)
 
@@ -172,6 +186,9 @@ Previous conversation:
         # Add response to history
         self.conversation_history.append({"role": "assistant", "content": response})
 
+        # Auto-extract memories from this exchange
+        self._extract_and_save_memories(user_message, response)
+
         return response
 
     def _chat_with_sdk(self, user_message: str) -> str:
@@ -226,6 +243,9 @@ Provide a helpful, specific response. If you need to verify something against so
 
         # Add response to history
         self.conversation_history.append({"role": "assistant", "content": response})
+
+        # Auto-extract memories from this exchange
+        self._extract_and_save_memories(user_message, response)
 
         return response
 
@@ -310,6 +330,19 @@ Provide a helpful, specific response. Be AGGRESSIVE about finding tax savings op
             "role": "assistant",
             "content": "".join(full_response),
         })
+
+    def _extract_and_save_memories(self, user_message: str, response: str) -> None:
+        """Extract and save memories from a conversation exchange."""
+        try:
+            from tax_agent.memory import MemoryManager
+            memory_mgr = MemoryManager(self.db)
+            new_memories = memory_mgr.extract_memories_from_response(
+                user_message, response, self.agent
+            )
+            for mem in new_memories:
+                self.db.save_memory(mem)
+        except Exception:
+            pass  # Memory extraction is optional, don't fail chat
 
     def _format_history(self) -> str:
         """Format conversation history for context."""
