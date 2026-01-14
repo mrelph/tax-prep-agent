@@ -48,6 +48,841 @@ Compatibility layer that automatically routes to Agent SDK or legacy API based o
 
 Claude Agent SDK integration providing agentic loops, tool use, and specialized subagents.
 
+#### `TaxAgentSDK`
+
+Main Agent SDK class for agentic tax operations.
+
+**Initialization:**
+
+```python
+from tax_agent.agent_sdk import TaxAgentSDK, get_sdk_agent
+
+# Create new SDK agent
+sdk_agent = TaxAgentSDK(
+    model="claude-sonnet-4-5",  # or any supported model
+    max_turns=10,               # Maximum agentic turns
+    use_hooks=True              # Enable safety/audit hooks
+)
+
+# Get global singleton
+sdk_agent = get_sdk_agent()
+
+# Check if SDK is available
+if sdk_agent.is_available:
+    # Use Agent SDK features
+    pass
+else:
+    # Falls back to legacy API
+    pass
+```
+
+**Constructor:**
+
+```python
+def __init__(
+    self,
+    model: str | None = None,
+    max_turns: int | None = None,
+    use_hooks: bool = True,
+) -> None:
+    """
+    Initialize the SDK-based tax agent.
+
+    Args:
+        model: Claude model to use. Supports:
+               - "claude-opus-4-5" → claude-opus-4-5-20251101
+               - "claude-sonnet-4-5" → claude-sonnet-4-5-20250929
+               - "claude-3-5-sonnet" → claude-3-5-sonnet-20241022
+        max_turns: Maximum agentic turns before stopping.
+                   Defaults to config.agent_sdk_max_turns (10)
+        use_hooks: Whether to enable safety/audit hooks.
+                   Recommended for production use.
+
+    Raises:
+        None - Falls back gracefully if SDK unavailable
+    """
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `is_available` | `bool` | Whether Agent SDK is available |
+| `model` | `str` | Full model identifier being used |
+| `max_turns` | `int` | Maximum agentic turns configured |
+| `use_hooks` | `bool` | Whether hooks are enabled |
+
+---
+
+#### Methods (Async)
+
+The Agent SDK provides async methods that support streaming responses and agentic loops.
+
+##### `classify_document_async()`
+
+Classify a tax document with agentic verification.
+
+```python
+async def classify_document_async(
+    self,
+    text: str,
+    file_path: Path | None = None,
+) -> dict:
+    """
+    Classify a tax document using agentic loop with verification.
+
+    The agent can use tools (Read, Grep) to verify classification
+    by searching for specific markers in the source file.
+
+    Args:
+        text: Extracted text from the document
+        file_path: Optional path to source file for tool access
+
+    Returns:
+        dict: {
+            "document_type": str,          # W2, 1099_INT, 1040, etc.
+            "document_category": str,      # "SOURCE" or "RETURN"
+            "confidence": float,           # 0.0-1.0
+            "issuer_name": str,            # Entity that issued
+            "tax_year": int,               # Tax year
+            "reasoning": str               # Why classified this way
+        }
+
+    Example:
+        >>> async for message in sdk_agent.classify_document_async(
+        ...     text=w2_text,
+        ...     file_path=Path("~/taxes/w2.pdf")
+        ... ):
+        ...     result = message
+        >>> result["document_type"]
+        'W2'
+        >>> result["confidence"]
+        0.95
+    """
+```
+
+---
+
+##### `analyze_documents_async()`
+
+Comprehensive tax analysis with agentic verification and tool use.
+
+```python
+async def analyze_documents_async(
+    self,
+    documents_summary: str,
+    taxpayer_info: str,
+    source_dir: Path | None = None,
+) -> AsyncIterator[str]:
+    """
+    Analyze tax documents with agentic capabilities.
+
+    The agent can:
+    - Read source documents to verify amounts
+    - Search for patterns across documents
+    - Look up current IRS limits via web search
+    - Cross-reference information
+    - Perform multi-step analysis
+
+    Args:
+        documents_summary: Summary of all collected documents
+        taxpayer_info: Taxpayer profile information
+        source_dir: Directory containing source documents for tool access
+
+    Yields:
+        str: Analysis text chunks as they're generated (streaming)
+
+    Example:
+        >>> async for chunk in sdk_agent.analyze_documents_async(
+        ...     documents_summary=docs,
+        ...     taxpayer_info=profile,
+        ...     source_dir=Path("~/.tax-agent/data")
+        ... ):
+        ...     print(chunk, end="", flush=True)
+
+        # Outputs streaming analysis with verification
+    """
+```
+
+---
+
+##### `review_return_async()`
+
+Comprehensive tax return review with cross-validation.
+
+```python
+async def review_return_async(
+    self,
+    return_text: str,
+    source_documents: str,
+    source_dir: Path | None = None,
+) -> AsyncIterator[str]:
+    """
+    Review a tax return with agentic verification.
+
+    The agent can:
+    - Read source documents to verify amounts
+    - Cross-reference every line item
+    - Detect mathematical errors
+    - Find missed deductions and credits
+    - Assess compliance and audit risk
+
+    Args:
+        return_text: Text extracted from the tax return
+        source_documents: Summary of source documents
+        source_dir: Directory containing source documents
+
+    Yields:
+        str: Review findings as they're generated
+
+    Example:
+        >>> async for chunk in sdk_agent.review_return_async(
+        ...     return_text=return_pdf_text,
+        ...     source_documents=docs_summary,
+        ...     source_dir=Path("~/taxes")
+        ... ):
+        ...     print(chunk, end="", flush=True)
+    """
+```
+
+---
+
+##### `interactive_query_async()`
+
+Interactive conversational tax queries with full tool access.
+
+```python
+async def interactive_query_async(
+    self,
+    query_text: str,
+    context: dict | None = None,
+    source_dir: Path | None = None,
+) -> AsyncIterator[str]:
+    """
+    Run an interactive tax query with full agentic capabilities.
+
+    The agent can use all available tools to research and
+    verify information before providing answers.
+
+    Args:
+        query_text: The user's question or request
+        context: Optional context (documents, profile, etc.)
+        source_dir: Directory for file access
+
+    Yields:
+        str: Response chunks as they're generated
+
+    Example:
+        >>> context = {
+        ...     "documents": ["W-2", "1099-B"],
+        ...     "tax_year": 2024
+        ... }
+        >>> async for chunk in sdk_agent.interactive_query_async(
+        ...     "How will my RSUs affect my taxes?",
+        ...     context=context,
+        ...     source_dir=Path("~/taxes")
+        ... ):
+        ...     print(chunk, end="", flush=True)
+    """
+```
+
+---
+
+##### `invoke_subagent_async()`
+
+Delegate task to a specialized subagent.
+
+```python
+async def invoke_subagent_async(
+    self,
+    subagent_name: str,
+    prompt: str,
+    source_dir: Path | None = None,
+) -> AsyncIterator[str]:
+    """
+    Invoke a specialized subagent for a specific task.
+
+    Args:
+        subagent_name: Name of the subagent (e.g., 'deduction-finder')
+        prompt: Task prompt for the subagent
+        source_dir: Directory for file access
+
+    Yields:
+        str: Response chunks from the subagent
+
+    Available subagents:
+        - stock-compensation-analyst
+        - deduction-finder
+        - compliance-auditor
+        - investment-tax-analyst
+        - retirement-tax-planner
+        - self-employment-specialist
+
+    Example:
+        >>> async for chunk in sdk_agent.invoke_subagent_async(
+        ...     "deduction-finder",
+        ...     "Find all missed deductions for my situation",
+        ...     source_dir=Path("~/.tax-agent/data")
+        ... ):
+        ...     print(chunk, end="", flush=True)
+    """
+```
+
+---
+
+#### Methods (Synchronous)
+
+Synchronous wrappers for backward compatibility.
+
+```python
+# Synchronous versions that block until complete
+def classify_document(text: str, file_path: Path | None = None) -> dict
+def analyze_documents(docs_summary: str, taxpayer_info: str, source_dir: Path | None = None) -> str
+def review_return(return_text: str, source_docs: str, source_dir: Path | None = None) -> str
+def interactive_query(query: str, context: dict | None = None, source_dir: Path | None = None) -> str
+def invoke_subagent(name: str, prompt: str, source_dir: Path | None = None) -> str
+```
+
+---
+
+#### Subagent Management
+
+```python
+def get_subagent(self, name: str) -> SubagentDefinition | None:
+    """
+    Get a specialized subagent by name.
+
+    Returns:
+        SubagentDefinition or None if not found
+    """
+
+def list_subagents(self) -> list[dict[str, str]]:
+    """
+    List all available specialized subagents.
+
+    Returns:
+        List of dicts with 'name' and 'description'
+
+    Example:
+        >>> subagents = sdk_agent.list_subagents()
+        >>> for agent in subagents:
+        ...     print(f"{agent['name']}: {agent['description']}")
+    """
+```
+
+---
+
+## Slash Commands Module
+
+### `tax_agent.slash_commands`
+
+Slash command registry and handlers for the interactive interface.
+
+#### `SlashCommand`
+
+Definition of a slash command.
+
+```python
+@dataclass
+class SlashCommand:
+    name: str                          # Command name (without /)
+    description: str                   # Help text
+    handler: Callable[..., str]        # Command function
+    aliases: list[str]                 # Alternative names
+    subcommands: dict[str, SlashCommand]  # Nested commands
+    requires_init: bool                # Needs initialization
+    usage: str                         # Usage example
+```
+
+---
+
+#### Functions
+
+##### `register_command()`
+
+Register a new slash command.
+
+```python
+def register_command(
+    name: str,
+    description: str,
+    handler: Callable[..., str],
+    aliases: list[str] | None = None,
+    requires_init: bool = True,
+    usage: str = "",
+) -> SlashCommand:
+    """
+    Register a slash command.
+
+    Example:
+        >>> def cmd_example(args: list[str], context: dict) -> str:
+        ...     return f"Example command with args: {args}"
+        >>>
+        >>> register_command(
+        ...     "example",
+        ...     "Example command",
+        ...     cmd_example,
+        ...     aliases=["ex"],
+        ...     usage="<arg1> <arg2>"
+        ... )
+    """
+```
+
+---
+
+##### `get_command()`
+
+Retrieve a command by name or alias.
+
+```python
+def get_command(name: str) -> SlashCommand | None:
+    """
+    Get a slash command by name (with or without leading /).
+
+    Example:
+        >>> cmd = get_command("help")
+        >>> cmd = get_command("/help")  # Same result
+    """
+```
+
+---
+
+##### `get_completions()`
+
+Get tab completions for partial input.
+
+```python
+def get_completions(partial: str) -> list[str]:
+    """
+    Get command completions for partial input.
+
+    Args:
+        partial: Partial command text (with or without /)
+
+    Returns:
+        List of matching command names with /
+
+    Example:
+        >>> get_completions("/an")
+        ['/analyze']
+        >>> get_completions("/d")
+        ['/documents', '/docs', '/d']
+    """
+```
+
+---
+
+##### `parse_slash_command()`
+
+Parse user input into command and arguments.
+
+```python
+def parse_slash_command(input_text: str) -> tuple[str | None, list[str]]:
+    """
+    Parse a slash command from input text.
+
+    Returns:
+        Tuple of (command_name, args) or (None, []) if not a slash command
+
+    Example:
+        >>> parse_slash_command("/collect ~/taxes/w2.pdf --year 2024")
+        ('collect', ['~/taxes/w2.pdf', '--year', '2024'])
+        >>> parse_slash_command("How do RSUs work?")
+        (None, [])
+    """
+```
+
+---
+
+##### `execute_slash_command()`
+
+Execute a slash command and return result.
+
+```python
+async def execute_slash_command(
+    command_name: str,
+    args: list[str],
+    context: dict[str, Any] | None = None,
+) -> str:
+    """
+    Execute a slash command and return the result.
+
+    Example:
+        >>> result = await execute_slash_command(
+        ...     "status",
+        ...     [],
+        ...     {}
+        ... )
+    """
+```
+
+---
+
+## Subagents Module
+
+### `tax_agent.subagents`
+
+Specialized subagents for tax analysis domains.
+
+#### `SubagentDefinition`
+
+Configuration for a specialized subagent.
+
+```python
+@dataclass
+class SubagentDefinition:
+    name: str                    # Subagent identifier
+    description: str             # What it specializes in
+    system_prompt: str           # Domain-specific prompt
+    allowed_tools: list[str]     # Tools it can use
+    max_turns: int               # Maximum agentic turns
+    model: str | None            # Model override (optional)
+```
+
+---
+
+#### Available Subagents
+
+##### Stock Compensation Analyst
+
+```python
+STOCK_COMPENSATION_ANALYST = SubagentDefinition(
+    name="stock-compensation-analyst",
+    description="Expert in RSU, ISO, NSO, and ESPP taxation",
+    system_prompt="...",  # Specialized prompt
+    allowed_tools=["Read", "Grep", "Glob", "detect_wash_sales", "calculate_tax"],
+    max_turns=8,
+)
+```
+
+**Expertise:**
+- RSU vesting and sale taxation
+- ISO AMT calculations
+- NSO ordinary income treatment
+- ESPP qualifying vs disqualifying dispositions
+- Wash sale detection
+- Cost basis verification
+
+---
+
+##### Deduction Finder
+
+```python
+DEDUCTION_FINDER = SubagentDefinition(
+    name="deduction-finder",
+    description="Aggressive deduction and credit optimizer",
+    system_prompt="...",
+    allowed_tools=["Read", "Grep", "Glob", "WebSearch", "calculate_tax", "check_limits"],
+    max_turns=10,
+)
+```
+
+**Expertise:**
+- Above-the-line deductions
+- Itemized vs standard comparison
+- Business deductions (Schedule C)
+- Tax credits (education, child, energy, etc.)
+- Bunching strategies
+
+---
+
+##### Compliance Auditor
+
+```python
+COMPLIANCE_AUDITOR = SubagentDefinition(
+    name="compliance-auditor",
+    description="IRS compliance and audit risk assessor",
+    system_prompt="...",
+    allowed_tools=["Read", "Grep", "Glob"],
+    max_turns=8,
+)
+```
+
+**Expertise:**
+- Income verification against source docs
+- Mathematical error detection
+- Deduction reasonableness checks
+- Audit red flag identification
+- Compliance issue severity rating
+
+---
+
+##### Investment Tax Analyst
+
+```python
+INVESTMENT_TAX_ANALYST = SubagentDefinition(
+    name="investment-tax-analyst",
+    description="Capital gains, dividends, and investment income specialist",
+    system_prompt="...",
+    allowed_tools=["Read", "Grep", "Glob", "detect_wash_sales", "calculate_tax"],
+    max_turns=10,
+)
+```
+
+**Expertise:**
+- Short vs long-term capital gains
+- Qualified dividend classification
+- Wash sale detection
+- Net Investment Income Tax (NIIT)
+- Cost basis issues
+- Tax-loss harvesting strategies
+
+---
+
+##### Retirement Tax Planner
+
+```python
+RETIREMENT_TAX_PLANNER = SubagentDefinition(
+    name="retirement-tax-planner",
+    description="401(k), IRA, and retirement account optimization specialist",
+    system_prompt="...",
+    allowed_tools=["Read", "Grep", "WebSearch", "check_limits", "calculate_tax"],
+    max_turns=8,
+)
+```
+
+**Expertise:**
+- Contribution limits and optimization
+- Traditional vs Roth analysis
+- Backdoor Roth strategies
+- Mega backdoor Roth
+- RMD planning
+- Early distribution strategies
+
+---
+
+##### Self-Employment Specialist
+
+```python
+SELF_EMPLOYMENT_SPECIALIST = SubagentDefinition(
+    name="self-employment-specialist",
+    description="Schedule C, SE tax, and business deduction expert",
+    system_prompt="...",
+    allowed_tools=["Read", "Grep", "Glob", "calculate_tax"],
+    max_turns=8,
+)
+```
+
+**Expertise:**
+- Schedule C analysis
+- Self-employment tax calculation
+- Home office deduction (simplified vs actual)
+- Vehicle expenses
+- Section 179 deductions
+- QBI deduction
+- Estimated tax requirements
+
+---
+
+#### Functions
+
+```python
+def get_subagent(name: str) -> SubagentDefinition | None:
+    """Get a subagent by name."""
+
+def list_subagents() -> list[dict[str, str]]:
+    """List all subagents with names and descriptions."""
+
+def get_subagent_for_task(task_description: str) -> SubagentDefinition | None:
+    """
+    Suggest the best subagent for a task based on keywords.
+
+    Example:
+        >>> agent = get_subagent_for_task("analyze my RSU taxes")
+        >>> agent.name
+        'stock-compensation-analyst'
+    """
+```
+
+---
+
+## Safety Hooks Module
+
+### `tax_agent.hooks`
+
+Safety and audit hooks for Agent SDK operations.
+
+#### Hook Functions
+
+All hooks follow the same signature:
+
+```python
+async def hook_name(
+    input_data: dict,
+    tool_use_id: str | None,
+    context: Any,
+) -> dict:
+    """
+    Hook function.
+
+    Args:
+        input_data: Tool invocation or result data
+        tool_use_id: Unique identifier for this tool use
+        context: Additional context
+
+    Returns:
+        dict: Hook-specific output (can be empty)
+              May include permission decisions or data transformations
+    """
+```
+
+---
+
+#### PreToolUse Hooks
+
+Run before a tool is executed.
+
+##### `audit_log_hook()`
+
+Log all tool invocations for audit trail.
+
+```python
+async def audit_log_hook(input_data, tool_use_id, context) -> dict:
+    """
+    Log tool usage.
+
+    Logs:
+        - Tool name
+        - Tool inputs
+        - Timestamp
+        - Context information
+    """
+```
+
+---
+
+##### `sensitive_data_guard()`
+
+Restrict file access to tax-relevant directories.
+
+```python
+async def sensitive_data_guard(input_data, tool_use_id, context) -> dict:
+    """
+    Block access to files outside allowed directories.
+
+    Allowed:
+        - /tmp/
+        - ~/.tax-agent/data/
+        - ~/.tax-agent/config/
+
+    Returns:
+        - Empty dict if allowed
+        - Permission denial if blocked
+    """
+```
+
+---
+
+##### `web_access_guard()`
+
+Control web tool usage based on configuration.
+
+```python
+async def web_access_guard(input_data, tool_use_id, context) -> dict:
+    """
+    Block web tools if disabled in config.
+
+    Checks config.agent_sdk_allow_web setting.
+    """
+```
+
+---
+
+#### PostToolUse Hooks
+
+Run after a tool completes.
+
+##### `ssn_redaction_hook()`
+
+Redact SSN patterns from tool outputs.
+
+```python
+async def ssn_redaction_hook(input_data, tool_use_id, context) -> dict:
+    """
+    Redact Social Security Numbers from outputs.
+
+    Patterns:
+        - XXX-XX-XXXX → [SSN REDACTED]
+        - XXXXXXXXX → [SSN REDACTED]
+
+    Returns:
+        Updated result with redactions
+    """
+```
+
+---
+
+##### `ein_redaction_hook()`
+
+Optionally redact EIN patterns from outputs.
+
+```python
+async def ein_redaction_hook(input_data, tool_use_id, context) -> dict:
+    """
+    Redact Employer Identification Numbers.
+
+    Only active if config.redact_ein is True.
+
+    Pattern:
+        - XX-XXXXXXX → [EIN REDACTED]
+    """
+```
+
+---
+
+##### `rate_limit_hook()`
+
+Track tool usage for rate limiting.
+
+```python
+async def rate_limit_hook(input_data, tool_use_id, context) -> dict:
+    """
+    Track tool invocations for rate limiting.
+
+    Especially monitors expensive web tools.
+    """
+```
+
+---
+
+#### Hook Configuration
+
+```python
+def get_tax_hooks() -> dict:
+    """
+    Get all hooks configured for the tax agent.
+
+    Returns:
+        dict: {
+            "PreToolUse": [
+                audit_log_hook,
+                sensitive_data_guard,
+                web_access_guard,
+            ],
+            "PostToolUse": [
+                audit_log_hook,
+                ssn_redaction_hook,
+                ein_redaction_hook,
+                rate_limit_hook,
+            ],
+        }
+
+    Example:
+        >>> from tax_agent.hooks import get_tax_hooks
+        >>> hooks = get_tax_hooks()
+        >>> # Pass to ClaudeCodeOptions
+    """
+
+def get_minimal_hooks() -> dict:
+    """
+    Get minimal hooks for performance-sensitive operations.
+
+    Returns only essential security hooks.
+    """
+```
+
+---
+
 #### `TaxAgent`
 
 Main class for all AI interactions.

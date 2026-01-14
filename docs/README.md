@@ -1,6 +1,6 @@
 # Tax Prep Agent Documentation
 
-Comprehensive documentation for the Tax Prep Agent - an AI-powered CLI tool for tax document collection, analysis, and return review.
+Comprehensive documentation for the Tax Prep Agent - an AI-powered conversational tax assistant built on Anthropic's Claude Agent SDK. Features intelligent document analysis, specialized tax domain subagents, and an interactive interface with slash commands.
 
 ## Documentation Index
 
@@ -42,6 +42,24 @@ Comprehensive documentation for the Tax Prep Agent - an AI-powered CLI tool for 
 | Data models | [API: Models](API.md#models) |
 | Testing strategy | [ARCHITECTURE: Testing](ARCHITECTURE.md#testing-strategy) |
 
+## What's New: Agent SDK Architecture
+
+The tax-prep-agent has been redesigned with the Claude Agent SDK as the primary interface:
+
+**Key Features:**
+- **Interactive Conversational Mode**: Natural language tax advice with agentic loops
+- **Specialized Subagents**: Domain experts for stock compensation, deductions, compliance, and more
+- **Slash Command System**: Tab-completable structured commands (`/help`, `/analyze`, `/subagent`)
+- **Tool Use**: Agents can read documents, search for patterns, and verify information
+- **Safety Hooks**: Audit logging, SSN redaction, file access controls, and rate limiting
+
+**See:**
+- [ARCHITECTURE.md](ARCHITECTURE.md#agent-sdk-layer) - Agent SDK design
+- [API.md](API.md#agent-sdk-module) - TaxAgentSDK class reference
+- [USAGE.md](USAGE.md#interactive-mode-recommended) - Interactive mode guide
+
+---
+
 ## Documentation Overview
 
 ### [USAGE.md](USAGE.md)
@@ -49,6 +67,8 @@ Comprehensive documentation for the Tax Prep Agent - an AI-powered CLI tool for 
 **Audience:** End users and tax filers
 
 **Contents:**
+- **Interactive mode guide** (new)
+- **Slash command reference** (new)
 - Complete CLI command reference
 - Interactive examples and workflows
 - Configuration options
@@ -58,9 +78,10 @@ Comprehensive documentation for the Tax Prep Agent - an AI-powered CLI tool for 
 
 **Best for:**
 - Learning how to use the tool
+- Using interactive mode with slash commands
+- Understanding subagents and their capabilities
 - Finding command syntax
 - Troubleshooting errors
-- Understanding features
 
 ---
 
@@ -88,15 +109,21 @@ Comprehensive documentation for the Tax Prep Agent - an AI-powered CLI tool for 
 **Audience:** Developers and contributors
 
 **Contents:**
+- **Agent SDK architecture** (new)
+- **Slash command system** (new)
+- **Subagent framework** (new)
+- **Safety hooks** (new)
 - High-level system design
 - Component breakdown and responsibilities
-- Data flow diagrams
+- Data flow diagrams (updated with Agent SDK flows)
 - AI integration patterns
 - Security architecture
 - Extension points
 
 **Best for:**
-- Understanding how the system works
+- Understanding the Agent SDK integration
+- Learning how subagents work
+- Understanding agentic loops and tool use
 - Contributing new features
 - Debugging complex issues
 - Architectural decisions
@@ -108,17 +135,23 @@ Comprehensive documentation for the Tax Prep Agent - an AI-powered CLI tool for 
 **Audience:** Developers building on or extending the tool
 
 **Contents:**
+- **TaxAgentSDK API reference** (new)
+- **Slash command module** (new)
+- **Subagent definitions** (new)
+- **Safety hooks module** (new)
 - Complete Python API reference
 - Class and method documentation
 - Type signatures
-- Usage examples
+- Usage examples (async and sync)
 - Error handling
 
 **Best for:**
-- Programmatic usage
+- Using the Agent SDK programmatically
+- Creating custom subagents
+- Implementing custom hooks
+- Understanding async streaming APIs
 - Building extensions
 - Understanding module interfaces
-- API integration
 
 ## Documentation Standards
 
@@ -198,6 +231,10 @@ tax-agent status
 
 | Feature | User Guide | Developer Docs |
 |---------|-----------|----------------|
+| **Interactive Mode** | [USAGE: Interactive Mode](USAGE.md#interactive-mode-recommended) | [API: TaxAgentSDK](API.md#taxagentsdk) |
+| **Slash Commands** | [USAGE: Getting Started](USAGE.md#interactive-mode-recommended) | [API: Slash Commands](API.md#slash-commands-module) |
+| **Specialized Subagents** | [USAGE: Example Session](USAGE.md#interactive-mode-recommended) | [API: Subagents](API.md#subagents-module) |
+| **Safety Hooks** | [README: Architecture](../README.md#architecture-highlights) | [API: Hooks](API.md#safety-hooks-module) |
 | Document Collection | [USAGE: collect](USAGE.md#tax-agent-collect-file) | [API: DocumentCollector](API.md#documentcollector) |
 | OCR Processing | [README: Features](../README.md#document-collection--processing) | [API: OCR](API.md#tax_agentcollectorsocr) |
 | Tax Analysis | [USAGE: analyze](USAGE.md#tax-agent-analyze) | [API: TaxAnalyzer](API.md#taxanalyzer) |

@@ -388,7 +388,7 @@ def _start_interactive_mode() -> None:
         "  /analyze  - Run tax analysis\n"
         "  /optimize - Find deductions\n\n"
         "Or just ask a question about your taxes!\n\n"
-        "[dim]Type 'quit' to exit[/dim]",
+        "[dim]Keyboard: Ctrl+C to exit • Ctrl+D for status • Tab for autocomplete[/dim]",
         title="Interactive Mode"
     ))
 
@@ -403,7 +403,7 @@ def _start_interactive_mode() -> None:
     # Set up prompt with autocomplete
     try:
         from prompt_toolkit import prompt as pt_prompt
-        from prompt_toolkit.completion import WordCompleter
+        from prompt_toolkit.completion import WordCompleter, CompleteStyle
         from prompt_toolkit.styles import Style
 
         # Create completer with slash commands
@@ -422,7 +422,8 @@ def _start_interactive_mode() -> None:
                 "> ",
                 completer=command_completer,
                 style=style,
-                complete_while_typing=True,
+                complete_while_typing=False,  # Only complete on Tab
+                complete_style=CompleteStyle.READLINE_LIKE,  # Inline completion like bash
             )
 
         has_autocomplete = True
@@ -434,7 +435,7 @@ def _start_interactive_mode() -> None:
             return Prompt.ask("\n[bold green]>[/bold green]")
 
     if has_autocomplete:
-        rprint("[dim]Tip: Press Tab for command autocomplete[/dim]\n")
+        rprint("[dim]Tip: Type / then Tab for inline completion[/dim]\n")
 
     # Main interaction loop
     while True:

@@ -124,6 +124,30 @@ def parse_slash_command(input_text: str) -> tuple[str | None, list[str]]:
     return parts[0], parts[1:]
 
 
+def _find_similar_commands(name: str, threshold: float = 0.5) -> list[str]:
+    """Find similar command names for suggestions."""
+    from difflib import SequenceMatcher
+
+    name_lower = name.lower()
+    suggestions = []
+
+    for cmd in list_commands():
+        # Check main command name
+        ratio = SequenceMatcher(None, name_lower, cmd.name.lower()).ratio()
+        if ratio >= threshold:
+            suggestions.append((ratio, f"/{cmd.name}"))
+
+        # Check aliases too
+        for alias in cmd.aliases:
+            ratio = SequenceMatcher(None, name_lower, alias.lower()).ratio()
+            if ratio >= threshold:
+                suggestions.append((ratio, f"/{alias}"))
+
+    # Sort by similarity (highest first) and return top 3
+    suggestions.sort(reverse=True, key=lambda x: x[0])
+    return [s[1] for s in suggestions[:3]]
+
+
 async def execute_slash_command(
     command_name: str,
     args: list[str],
@@ -132,7 +156,12 @@ async def execute_slash_command(
     """Execute a slash command and return the result."""
     cmd = get_command(command_name)
     if not cmd:
-        return f"Unknown command: /{command_name}. Type /help for available commands."
+        # Suggest similar commands
+        similar = _find_similar_commands(command_name)
+        if similar:
+            suggestions = ", ".join(similar)
+            return f"✗ Unknown command: /{command_name}\n\n**Did you mean:** {suggestions}\n\nType `/help` for all commands."
+        return f"✗ Unknown command: /{command_name}. Type `/help` for available commands."
 
     from tax_agent.config import get_config
     config = get_config()
@@ -191,31 +220,44 @@ def cmd_help(args: list[str], context: dict) -> str:
 def cmd_status(args: list[str], context: dict) -> str:
     """Show current tax agent status."""
     from tax_agent.config import get_config, AI_PROVIDER_AWS_BEDROCK
-    import os
 
     config = get_config()
 
     lines = ["# Tax Agent Status\n"]
 
-    lines.append(f"- **Initialized:** {'Yes' if config.is_initialized else 'No'}")
+    lines.append(f"- **Initialized:** {'✓ Yes' if config.is_initialized else '✗ No'}")
     lines.append(f"- **Tax Year:** {config.tax_year}")
     lines.append(f"- **State:** {config.state or 'Not set'}")
     lines.append(f"- **AI Provider:** {config.ai_provider}")
     lines.append(f"- **Model:** {config.get('model', 'claude-sonnet-4-5')}")
-    lines.append(f"- **Agent SDK:** {'Enabled' if config.use_agent_sdk else 'Disabled'}")
+    lines.append(f"- **Agent SDK:** {'✓ Enabled' if config.use_agent_sdk else 'Disabled'}")
 
     if config.ai_provider == AI_PROVIDER_AWS_BEDROCK:
         lines.append(f"- **AWS Region:** {config.aws_region}")
 
-    # Show document count
+    # Show document count and guidance
     try:
         from tax_agent.storage.database import get_database
         db = get_database()
         docs = db.get_documents()
-        lines.append(f"- **Documents Collected:** {len(docs)}")
-    except Exception:
-        lines.append(f"- **Documents Collected:** (unavailable)")
+        doc_count = len(docs)
+        lines.append(f"- **Documents Collected:** {doc_count}")
 
+        # Empty state guidance
+        if doc_count == 0:
+            lines.append("\n## Get Started\n")
+            lines.append("No documents collected yet. Here's how to begin:\n")
+            lines.append("1. `/find` - Search for tax documents on your computer")
+            lines.append("2. `/collect <file>` - Add a tax document")
+            lines.append("3. `/analyze` - Analyze your tax situation\n")
+            lines.append("**Tip:** Try `/find ~/Downloads` to search your Downloads folder")
+        elif doc_count > 0:
+            lines.append("\n## Next Steps\n")
+            lines.append("- `/analyze` - Get a full tax analysis")
+            lines.append("- `/optimize` - Find missed deductions")
+            lines.append("- `/documents` - View collected documents")
+    except Exception:
+        lines.append("- **Documents Collected:** (unavailable)")
 
     return "\n".join(lines)
 
@@ -267,10 +309,27 @@ def cmd_documents(args: list[str], context: dict) -> str:
             return "Usage: /documents delete <document_id>"
         doc_id = args[1]
         db = get_database()
-        if db.delete_document(doc_id):
-            return f"Document deleted: {doc_id}"
-        else:
-            return f"Document not found: {doc_id}"
+
+        # Get document details first
+        doc = db.get_document(doc_id)
+        if not doc:
+            return f"✗ Document not found: {doc_id}"
+
+        # Show what will be deleted and require confirmation
+        doc_type = doc.document_type
+        issuer = doc.issuer_name
+
+        # Check for --force flag to skip confirmation
+        if "--force" in args or "-f" in args:
+            db.delete_document(doc_id)
+            return f"✓ Deleted: {doc_type} from {issuer}"
+
+        return (
+            f"⚠️ **Confirm deletion**\n\n"
+            f"Document: **{doc_type}** from {issuer}\n"
+            f"ID: `{doc_id}`\n\n"
+            f"To confirm, run: `/documents delete {doc_id} --force`"
+        )
 
     else:
         return f"Unknown subcommand: {subcommand}. Use 'list', 'show', or 'delete'."
@@ -294,7 +353,7 @@ def cmd_collect(args: list[str], context: dict) -> str:
                 return f"Invalid year: {args[idx + 1]}"
 
     if not file_path.exists():
-        return f"File not found: {file_path}"
+        return f"✗ File not found: {file_path}\n\n**Tip:** Use `/find` to search for tax documents"
 
     from tax_agent.collectors.document_classifier import get_document_collector
 
@@ -302,15 +361,16 @@ def cmd_collect(args: list[str], context: dict) -> str:
     result = collector.process_file(file_path, tax_year=year)
 
     if isinstance(result, Exception):
-        return f"Error processing file: {result}"
+        return f"✗ Error processing file: {result}"
 
     doc = result
     return (
-        f"# Document Collected\n\n"
+        f"# ✓ Document Collected\n\n"
         f"- **Type:** {doc.document_type}\n"
         f"- **Issuer:** {doc.issuer_name}\n"
         f"- **Tax Year:** {doc.tax_year}\n"
-        f"- **Confidence:** {doc.confidence:.0%}"
+        f"- **Confidence:** {doc.confidence:.0%}\n\n"
+        f"**Next:** `/analyze` to see tax implications or `/collect` to add more documents"
     )
 
 
@@ -508,16 +568,19 @@ def cmd_config(args: list[str], context: dict) -> str:
         value = args[2]
 
         # Type conversion for known keys
-        if key in ("tax_year", "agent_sdk_max_turns"):
-            value = int(value)
-        elif key in ("use_agent_sdk", "agent_sdk_allow_web", "auto_redact_ssn"):
-            value = value.lower() in ("true", "1", "yes")
+        try:
+            if key in ("tax_year", "agent_sdk_max_turns"):
+                value = int(value)
+            elif key in ("use_agent_sdk", "agent_sdk_allow_web", "auto_redact_ssn"):
+                value = value.lower() in ("true", "1", "yes")
 
-        config.set(key, value)
-        return f"Set **{key}** to `{value}`"
+            config.set(key, value)
+            return f"✓ Set **{key}** to `{value}`"
+        except (ValueError, TypeError) as e:
+            return f"✗ Invalid value for {key}: {value}"
 
     else:
-        return "Usage:\n- /config - Show all settings\n- /config get <key> - Get a value\n- /config set <key> <value> - Set a value"
+        return "Usage:\n- `/config` - Show all settings\n- `/config get <key>` - Get a value\n- `/config set <key> <value>` - Set a value"
 
 
 def cmd_year(args: list[str], context: dict) -> str:
@@ -531,10 +594,12 @@ def cmd_year(args: list[str], context: dict) -> str:
 
     try:
         year = int(args[0])
+        if year < 2000 or year > 2100:
+            return f"✗ Invalid year: {args[0]} (use a year between 2000-2100)"
         config.tax_year = year
-        return f"Tax year set to **{year}**"
+        return f"✓ Tax year set to **{year}**"
     except ValueError:
-        return f"Invalid year: {args[0]}"
+        return f"✗ Invalid year: {args[0]} (use a 4-digit year like 2024)"
 
 
 def cmd_state(args: list[str], context: dict) -> str:
@@ -544,14 +609,27 @@ def cmd_state(args: list[str], context: dict) -> str:
     config = get_config()
 
     if not args:
-        return f"Current state: **{config.state or 'Not set'}**"
+        state_val = config.state or "Not set"
+        return f"Current state: **{state_val}**"
 
     state = args[0].upper()
     if len(state) != 2:
-        return f"Invalid state code: {args[0]}. Use two-letter code like CA, NY, TX."
+        return f"✗ Invalid state code: {args[0]}. Use two-letter code like CA, NY, TX."
+
+    # Validate it's a real US state code
+    valid_states = {
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+        "DC", "PR", "VI", "GU", "AS", "MP"
+    }
+    if state not in valid_states:
+        return f"✗ Unknown state code: {state}. Use a valid US state like CA, NY, TX."
 
     config.state = state
-    return f"State set to **{state}**"
+    return f"✓ State set to **{state}**"
 
 
 def cmd_find(args: list[str], context: dict) -> str:
@@ -611,18 +689,18 @@ def _register_all_commands() -> None:
     """Register all slash commands."""
     register_command("help", "Show available commands", cmd_help, ["h", "?"], requires_init=False)
     register_command("status", "Show current status", cmd_status, ["s"], requires_init=False)
-    register_command("documents", "List or manage documents", cmd_documents, ["docs", "d"], usage="[list|show|delete]")
+    register_command("documents", "List or manage documents", cmd_documents, ["docs", "d", "doc"], usage="[list|show|delete]")
     register_command("collect", "Collect a tax document", cmd_collect, ["c"], usage="<file_path>")
     register_command("find", "Find tax documents on your system", cmd_find, ["f"], usage="[directory]")
-    register_command("analyze", "Analyze tax situation", cmd_analyze, ["a"])
-    register_command("optimize", "Find optimization opportunities", cmd_optimize, ["opt", "o"])
+    register_command("analyze", "Analyze tax situation", cmd_analyze, ["a", "analyse", "analysis"])
+    register_command("optimize", "Find optimization opportunities", cmd_optimize, ["opt", "o", "optimise"])
     register_command("subagents", "List available subagents", cmd_subagents, requires_init=False)
     register_command("subagent", "Invoke a specialized subagent", cmd_subagent, usage="<name> <prompt>")
     register_command("validate", "Cross-validate documents", cmd_validate, ["v"])
     register_command("audit", "Assess audit risk", cmd_audit, usage="[--thorough]")
     register_command("plan", "Tax planning recommendations", cmd_plan, usage="[--year YEAR]")
     register_command("review", "Review a tax return", cmd_review, usage="<return_file>")
-    register_command("config", "View or change settings", cmd_config, ["cfg"], usage="[get|set] [key] [value]")
+    register_command("config", "View or change settings", cmd_config, ["cfg", "settings"], usage="[get|set] [key] [value]")
     register_command("year", "Set or show tax year", cmd_year, usage="[YEAR]")
     register_command("state", "Set or show state", cmd_state, usage="[STATE]")
     register_command("chat", "Interactive tax chat", cmd_chat, usage="<question>")

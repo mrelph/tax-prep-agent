@@ -32,7 +32,126 @@ tax-agent config set filing_status single
 tax-agent config set tax_year 2024
 ```
 
-### Quick Workflow Example
+### Interactive Mode (Recommended)
+
+The tax agent now features an intelligent interactive mode powered by the Claude Agent SDK:
+
+```bash
+# Start interactive mode
+tax-agent
+
+# Or explicitly
+tax-agent interactive
+```
+
+**What you can do in interactive mode:**
+
+1. **Natural Language Conversations**
+   - Ask questions in plain English
+   - Get contextual answers based on your collected documents
+   - Receive streaming responses as the agent thinks
+
+2. **Slash Commands**
+   - Use `/` prefixed commands for structured operations
+   - Tab completion for all commands
+   - Access all CLI features without leaving the session
+
+3. **Specialized Subagents**
+   - Automatically routed to domain experts
+   - Deep analysis for complex topics (stock compensation, deductions, etc.)
+   - Tool use for verification and research
+
+**Example Interactive Session:**
+
+```
+Welcome to Tax Prep Agent (Interactive Mode)
+Using Claude Agent SDK with specialized subagents
+
+Type /help for commands, or just ask a question!
+
+You: /status
+
+Agent SDK Mode: Enabled
+Tax Year: 2024
+State: CA
+Documents Collected: 0
+
+You: /collect ~/Downloads/w2.pdf
+
+[Processing document...]
+✓ Collected W-2 from Google LLC (2024)
+  - Wages: $150,000
+  - Federal tax withheld: $35,000
+  - Confidence: 95%
+
+You: How will this W-2 affect my taxes?
+
+[Analyzing with tax implications subagent...]
+
+Based on your W-2, here's what I see:
+
+Income Analysis:
+  - Your $150,000 wages put you in the 24% federal tax bracket
+  - Federal withholding of $35,000 appears adequate
+  - Estimated effective tax rate: ~23.3%
+
+Potential Issues:
+  ⚠ Box 12 shows $19,500 in 401(k) deferrals (Code D)
+  ✓ This reduces your taxable income to $130,500
+  ✓ Maximized 401(k) contribution for 2024
+
+Next Steps:
+  - Collect other income documents (1099s, etc.)
+  - Run /optimize to find deductions
+  - Verify state tax withholding matches CA requirements
+
+You: /subagents
+
+# Specialized Tax Subagents
+
+Use `/subagent <name>` to invoke a subagent with a specific task.
+
+- **stock-compensation-analyst** - Expert in RSU, ISO, NSO, and ESPP taxation
+- **deduction-finder** - Aggressive deduction and credit optimizer
+- **compliance-auditor** - IRS compliance and audit risk assessor
+- **investment-tax-analyst** - Capital gains, dividends, and investment income
+- **retirement-tax-planner** - 401(k), IRA, and retirement account optimization
+- **self-employment-specialist** - Schedule C, SE tax, and business deduction
+
+## Example
+```
+/subagent deduction-finder Find all missed deductions for my situation
+```
+
+You: /subagent deduction-finder Find all missed deductions
+
+[Invoking deduction-finder subagent...]
+[Reading collected documents...]
+[Searching for deduction patterns...]
+
+# Deduction Analysis
+
+Based on your W-2 and profile, here are potential deductions:
+
+Above-the-Line Deductions:
+  ✓ 401(k) contribution: $19,500 (already claimed)
+  ? HSA contribution: Are you HSA-eligible?
+    - Max: $4,150 individual, $8,300 family
+    - Ask: /chat Do I have an HSA-eligible health plan?
+
+Standard vs Itemized:
+  - Standard deduction (Single, 2024): $14,600
+  - Need itemized > $14,600 to benefit
+  - Consider: Mortgage interest, SALT, charitable giving
+
+You: quit
+
+Session ended. Use `tax-agent` to resume.
+```
+
+### Traditional CLI Workflow
+
+You can still use direct commands for automated workflows:
 
 ```bash
 # Collect documents from a folder
