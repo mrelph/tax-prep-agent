@@ -4,7 +4,10 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 from tax_agent.agent import get_agent
 from tax_agent.config import get_config
@@ -91,9 +94,11 @@ def load_tax_rules(tax_year: int = 2024) -> dict[str, Any]:
         rules_file = rules_dir / "federal_2024.yaml"
 
     try:
+        if yaml is None:
+            raise ImportError("yaml not available")
         with open(rules_file) as f:
             return yaml.safe_load(f)
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, ImportError):
         import logging
         logging.getLogger("tax_agent").info(
             f"Tax rules YAML not found for {tax_year}, using hardcoded fallback"
@@ -106,7 +111,7 @@ def load_state_rules(state: str, tax_year: int = 2024) -> dict[str, Any] | None:
     rules_dir = Path(__file__).parent.parent.parent.parent / "data" / "tax_rules" / "states"
     rules_file = rules_dir / f"{state.lower()}_{tax_year}.yaml"
 
-    if rules_file.exists():
+    if rules_file.exists() and yaml is not None:
         with open(rules_file) as f:
             return yaml.safe_load(f)
     return None

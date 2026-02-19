@@ -11,6 +11,7 @@ from tax_agent.models.taxpayer import FilingStatus
 @pytest.fixture
 def mock_database():
     """Mock database to avoid keyring issues in tests."""
+    import tax_agent.analyzers.implications  # noqa: F401 — ensure module is loaded before patching
     with patch('tax_agent.analyzers.implications.get_database') as mock_db:
         mock_db.return_value = MagicMock()
         yield mock_db

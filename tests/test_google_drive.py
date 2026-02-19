@@ -5,12 +5,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tax_agent.collectors.google_drive import (
-    DriveFile,
-    DriveFolder,
-    GoogleDriveCollector,
-    SUPPORTED_MIME_TYPES,
-)
+try:
+    from tax_agent.collectors.google_drive import (
+        DriveFile,
+        DriveFolder,
+        GoogleDriveCollector,
+        SUPPORTED_MIME_TYPES,
+    )
+except ImportError:
+    pytest.skip(
+        "Google Drive dependencies not installed",
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture
