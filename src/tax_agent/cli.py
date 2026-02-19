@@ -1754,6 +1754,100 @@ def export(
     rprint(f"[dim]Format: {format.upper()}, Tax Year: {tax_year}[/dim]")
 
 
+@app.command()
+def report(
+    output: Annotated[Path, typer.Argument(help="Output file path (e.g., summary.pdf)")] = Path("tax-summary.pdf"),
+    format: Annotated[str, typer.Option("--format", "-f", help="Output format: md or pdf")] = "pdf",
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
+) -> None:
+    """Generate a comprehensive tax preparation summary report.
+
+    Combines income analysis, tax estimates, withholding, document inventory,
+    and review findings into one report. Defaults to PDF output.
+
+    Examples:
+        tax-agent report                         # PDF summary to tax-summary.pdf
+        tax-agent report my-taxes.pdf            # PDF to custom filename
+        tax-agent report summary.md -f md        # Markdown format
+        tax-agent report -y 2023                 # Specific tax year
+    """
+    from tax_agent.analyzers.implications import TaxAnalyzer
+    from tax_agent.reports import generate_tax_summary, generate_tax_summary_pdf
+    from tax_agent.storage.database import get_database
+
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+    db = get_database()
+
+    format = format.lower()
+    if format not in ("md", "pdf", "markdown"):
+        rprint(f"[red]Invalid format: {format}. Use 'md' or 'pdf'.[/red]")
+        raise typer.Exit(1)
+    if format == "markdown":
+        format = "md"
+
+    with console.status(f"[bold green]Generating tax summary report for {tax_year}..."):
+        # Run the analysis
+        analyzer = TaxAnalyzer(tax_year)
+        analysis = analyzer.generate_analysis()
+
+        if "error" in analysis:
+            rprint(f"[yellow]{analysis['error']}[/yellow]")
+            rprint("[dim]Collect documents first with: tax-agent add <file>[/dim]")
+            raise typer.Exit(1)
+
+        # Gather supporting data
+        documents = db.get_documents(tax_year=tax_year)
+        reviews = db.get_reviews(tax_year=tax_year)
+        profile = db.get_taxpayer_profile(tax_year)
+        taxpayer_info = None
+        if profile:
+            taxpayer_info = {
+                "state": profile.state,
+                "dependents": profile.num_dependents,
+            }
+
+        if format == "pdf":
+            if not str(output).endswith(".pdf"):
+                output = output.with_suffix(".pdf")
+            output_path = generate_tax_summary_pdf(
+                analysis, output,
+                documents=documents, reviews=reviews, taxpayer_info=taxpayer_info,
+            )
+        else:
+            if not str(output).endswith(".md"):
+                output = output.with_suffix(".md")
+            content = generate_tax_summary(
+                analysis,
+                documents=documents, reviews=reviews, taxpayer_info=taxpayer_info,
+            )
+            output.write_text(content)
+            output_path = output
+
+    rprint(f"\n[green]Tax summary report generated: {output_path}[/green]")
+    rprint(f"[dim]Tax Year: {tax_year}, Format: {format.upper()}[/dim]")
+
+    # Print quick summary to console
+    income = analysis.get("income_summary", {})
+    tax_est = analysis.get("tax_estimate", {})
+    refund = analysis.get("refund_or_owed", 0)
+
+    rprint("")
+    rprint(Panel.fit(
+        f"[bold]Total Income:[/bold] ${sum(income.values()):,.2f}\n"
+        f"[bold]Federal Tax:[/bold]  ${tax_est.get('total_tax', 0):,.2f}\n"
+        f"[bold]{'Refund' if refund >= 0 else 'Owed'}:[/bold]       "
+        f"{'$' + f'{refund:,.2f}' if refund >= 0 else '$' + f'{-refund:,.2f}'}",
+        title=f"Tax Year {tax_year} Summary",
+        border_style="green" if refund >= 0 else "red",
+    ))
+
+
 # =============================================================================
 # AI Analysis Commands
 # =============================================================================
