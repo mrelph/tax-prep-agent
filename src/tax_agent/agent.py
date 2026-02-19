@@ -2079,13 +2079,7 @@ Provide comprehensive tax planning guidance."""
             }
 
 
-# Global agent instance
-_agent: TaxAgent | None = None
-
-
 def get_agent() -> TaxAgent:
     """Get the global tax agent instance."""
-    global _agent
-    if _agent is None:
-        _agent = TaxAgent()
-    return _agent
+    from tax_agent.registry import get_registry
+    return get_registry().agent

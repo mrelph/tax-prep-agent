@@ -672,13 +672,7 @@ class TaxDatabase:
         )
 
 
-# Global database instance
-_db: TaxDatabase | None = None
-
-
 def get_database() -> TaxDatabase:
     """Get the global database instance."""
-    global _db
-    if _db is None:
-        _db = TaxDatabase()
-    return _db
+    from tax_agent.registry import get_registry
+    return get_registry().database

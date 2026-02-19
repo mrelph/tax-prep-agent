@@ -278,13 +278,7 @@ class Config:
         return {k: v for k, v in self._config.items()}
 
 
-# Global config instance
-_config: Config | None = None
-
-
 def get_config() -> Config:
     """Get the global configuration instance."""
-    global _config
-    if _config is None:
-        _config = Config()
-    return _config
+    from tax_agent.registry import get_registry
+    return get_registry().config

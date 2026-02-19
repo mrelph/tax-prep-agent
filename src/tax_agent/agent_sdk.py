@@ -523,16 +523,10 @@ Question/Request:
         return self._sdk_available
 
 
-# Global SDK agent instance
-_sdk_agent: TaxAgentSDK | None = None
-
-
 def get_sdk_agent() -> TaxAgentSDK:
     """Get the global SDK-based tax agent instance."""
-    global _sdk_agent
-    if _sdk_agent is None:
-        _sdk_agent = TaxAgentSDK()
-    return _sdk_agent
+    from tax_agent.registry import get_registry
+    return get_registry().sdk_agent
 
 
 def sdk_available() -> bool:

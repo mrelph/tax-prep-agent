@@ -282,16 +282,10 @@ class TaxContext:
         return info
 
 
-# Global instance
-_context: TaxContext | None = None
-
-
 def get_tax_context() -> TaxContext:
     """Get the global tax context instance."""
-    global _context
-    if _context is None:
-        _context = TaxContext()
-    return _context
+    from tax_agent.registry import get_registry
+    return get_registry().tax_context
 
 
 def get_context_for_prompt() -> str:

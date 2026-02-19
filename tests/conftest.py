@@ -6,6 +6,23 @@ from pathlib import Path
 
 import pytest
 
+from tax_agent.registry import get_registry
+
+
+@pytest.fixture(autouse=True)
+def _reset_services():
+    """Reset all service singletons before and after every test."""
+    registry = get_registry()
+    registry.reset()
+    yield
+    registry.reset()
+
+
+@pytest.fixture
+def mock_registry():
+    """Yield the global registry for override() in tests that need mocks."""
+    return get_registry()
+
 
 @pytest.fixture
 def temp_dir():

@@ -597,10 +597,6 @@ class CompatibleAgent:
         )
 
 
-# Global compatible agent instance
-_compat_agent: CompatibleAgent | None = None
-
-
 def get_compatible_agent() -> CompatibleAgent:
     """
     Get the global compatible agent instance.
@@ -611,13 +607,11 @@ def get_compatible_agent() -> CompatibleAgent:
     Returns:
         CompatibleAgent instance
     """
-    global _compat_agent
-    if _compat_agent is None:
-        _compat_agent = CompatibleAgent()
-    return _compat_agent
+    from tax_agent.registry import get_registry
+    return get_registry().compat_agent
 
 
 def reset_compatible_agent() -> None:
     """Reset the global compatible agent (useful for testing)."""
-    global _compat_agent
-    _compat_agent = None
+    from tax_agent.registry import get_registry
+    get_registry().reset("compat_agent")
