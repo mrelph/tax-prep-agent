@@ -241,8 +241,8 @@ def cmd_help(args: list[str], context: dict) -> str:
     categories = {
         "General": ["help", "status", "start"],
         "Modes": ["mode", "prep", "review", "planning"],
-        "Documents": ["documents", "collect", "find"],
-        "Analysis": ["analyze", "optimize", "chat"],
+        "Documents": ["documents", "collect", "find", "checklist"],
+        "Analysis": ["analyze", "optimize", "chat", "deadlines"],
         "AI Features": ["subagent", "subagents", "validate", "audit"],
         "Google Drive": ["drive"],
         "Memory": ["memory", "forget"],
@@ -439,6 +439,56 @@ def cmd_documents(args: list[str], context: dict) -> str:
 - **File:** {doc.file_path or 'N/A'}
 """
 
+    elif subcommand == "edit":
+        if len(args) < 4:
+            return (
+                "Usage: /documents edit <document_id> <field> <value>\n\n"
+                "Editable fields: issuer_name, tax_year, or any extracted_data key\n\n"
+                "Examples:\n"
+                "  /documents edit abc123 issuer_name \"Acme Corp\"\n"
+                "  /documents edit abc123 box_1 75000.00\n"
+                "  /documents edit abc123 tax_year 2024"
+            )
+        doc_id = args[1]
+        field_name = args[2]
+        raw_value = " ".join(args[3:]).strip('"').strip("'")
+        db = get_database()
+
+        doc = db.get_document(doc_id)
+        if not doc:
+            return f"Document not found: {doc_id}"
+
+        # Top-level editable fields
+        if field_name == "issuer_name":
+            doc.issuer_name = raw_value
+            doc.updated_at = __import__("datetime").datetime.now()
+            db.save_document(doc)
+            return f"Updated issuer_name to \"{raw_value}\" for `{doc_id[:8]}`"
+        elif field_name == "tax_year":
+            try:
+                doc.tax_year = int(raw_value)
+                doc.updated_at = __import__("datetime").datetime.now()
+                db.save_document(doc)
+                return f"Updated tax_year to {raw_value} for `{doc_id[:8]}`"
+            except ValueError:
+                return f"Invalid year: {raw_value}"
+        else:
+            # Treat as extracted_data field
+            if not doc.extracted_data:
+                doc.extracted_data = {}
+            # Try numeric conversion
+            try:
+                parsed_value = float(raw_value)
+                if parsed_value == int(parsed_value):
+                    parsed_value = int(parsed_value)
+            except ValueError:
+                parsed_value = raw_value
+            old_value = doc.extracted_data.get(field_name, "(not set)")
+            doc.extracted_data[field_name] = parsed_value
+            doc.updated_at = __import__("datetime").datetime.now()
+            db.save_document(doc)
+            return f"Updated {field_name}: {old_value} -> {parsed_value} for `{doc_id[:8]}`"
+
     elif subcommand == "delete":
         if len(args) < 2:
             return "Usage: /documents delete <document_id>"
@@ -511,6 +561,7 @@ def cmd_documents(args: list[str], context: dict) -> str:
             "- `list` - List documents (use --folder for tree view, --tag to filter)\n"
             "- `folders` - Show folder tree view\n"
             "- `show <id>` - Show document details\n"
+            "- `edit <id> <field> <value>` - Edit document data\n"
             "- `tag <id> <tags>` - Add tags to a document\n"
             "- `untag <id> <tags>` - Remove tags from a document\n"
             "- `tags` - List all tags in use\n"
@@ -1510,6 +1561,163 @@ Use `/context edit` to open in your editor, or `/context show` to view.
 
 
 # ============================================================================
+# Deadlines & Checklist Commands
+# ============================================================================
+
+def cmd_deadlines(args: list[str], context: dict) -> str:
+    """Show key tax deadlines for the current tax year."""
+    from tax_agent.config import get_config
+
+    config = get_config()
+    tax_year = config.tax_year
+
+    # Filing year is the year after the tax year
+    filing_year = tax_year + 1
+
+    lines = [f"# Tax Deadlines for {tax_year}\n"]
+
+    deadlines = [
+        (f"Jan 15, {filing_year}", "Q4 estimated tax payment due"),
+        (f"Jan 31, {filing_year}", "Employers must send W-2s; 1099-NEC due"),
+        (f"Feb 15, {filing_year}", "1099-B, 1099-DIV, 1099-INT due from brokers/banks"),
+        (f"Mar 15, {filing_year}", "S-corp and partnership returns due (Form 1065, 1120-S)"),
+        (f"Apr 15, {filing_year}", "Individual return due (Form 1040) / Extension deadline"),
+        (f"Apr 15, {filing_year}", "IRA/HSA contribution deadline for prior year"),
+        (f"Jun 15, {filing_year}", "Q2 estimated tax payment due"),
+        (f"Sep 15, {filing_year}", "Q3 estimated tax payment / Extended S-corp/partnership due"),
+        (f"Oct 15, {filing_year}", "Extended individual return due"),
+    ]
+
+    # Check if self-employed or has estimated payments
+    has_estimates = False
+    try:
+        from tax_agent.storage.database import get_database
+        db = get_database()
+        profile = db.get_taxpayer_profile(tax_year)
+        if profile and profile.is_self_employed:
+            has_estimates = True
+    except Exception:
+        pass
+
+    from datetime import date
+    today = date.today()
+
+    for deadline_str, description in deadlines:
+        # Skip estimated payment lines if not self-employed (unless explicitly asked)
+        if "estimated" in description.lower() and not has_estimates and "--all" not in args:
+            continue
+
+        # Parse deadline to check if past
+        try:
+            deadline_date = __import__("datetime").datetime.strptime(
+                deadline_str, "%b %d, %Y"
+            ).date()
+            if deadline_date < today:
+                marker = "(past)"
+            elif (deadline_date - today).days <= 30:
+                marker = "**SOON**"
+            else:
+                marker = ""
+        except ValueError:
+            marker = ""
+
+        lines.append(f"- **{deadline_str}** - {description} {marker}")
+
+    if not has_estimates:
+        lines.append("\n*Estimated tax deadlines hidden. Use `--all` to show all.*")
+
+    lines.append(f"\n*State-specific deadlines may vary. Current state: {config.state or 'Not set'}*")
+
+    return "\n".join(lines)
+
+
+def cmd_checklist(args: list[str], context: dict) -> str:
+    """Show a checklist of expected vs collected documents."""
+    from tax_agent.config import get_config
+    from tax_agent.storage.database import get_database
+    from tax_agent.utils import get_enum_value
+
+    config = get_config()
+    db = get_database()
+    tax_year = config.tax_year
+
+    docs = db.get_documents(tax_year=tax_year)
+    collected_types = {}
+    for doc in docs:
+        doc_type = get_enum_value(doc.document_type)
+        collected_types[doc_type] = collected_types.get(doc_type, 0) + 1
+
+    # Build expected documents based on profile
+    expected = []
+    profile = None
+    try:
+        profile = db.get_taxpayer_profile(tax_year)
+    except Exception:
+        pass
+
+    # Everyone should have at least one income source
+    expected.append(("W2", "Wage income (from each employer)"))
+
+    # Common documents most filers receive
+    expected.append(("1099_INT", "Interest income (banks, savings)"))
+    expected.append(("1099_DIV", "Dividend income (investments)"))
+
+    # Profile-based expectations
+    if profile:
+        if profile.is_self_employed:
+            expected.append(("1099_NEC", "Self-employment income"))
+            expected.append(("1099_K", "Payment platform income (if applicable)"))
+
+        if profile.has_hsa:
+            expected.append(("5498_SA", "HSA contributions"))
+            expected.append(("1099_SA", "HSA distributions"))
+
+        if profile.has_foreign_accounts:
+            expected.append(("FBAR", "Foreign bank account report"))
+
+        if getattr(profile, "is_covered_by_employer_retirement", False):
+            expected.append(("5498", "IRA/retirement contributions"))
+
+        if profile.dependents:
+            expected.append(("1098_T", "Tuition statement (if students)"))
+    else:
+        expected.append(("1099_B", "Brokerage/investment sales"))
+
+    lines = [f"# Document Checklist - {tax_year}\n"]
+
+    has_missing = False
+    for doc_type, description in expected:
+        count = collected_types.get(doc_type, 0)
+        if count > 0:
+            lines.append(f"- [x] **{doc_type}** - {description} ({count} collected)")
+        else:
+            lines.append(f"- [ ] **{doc_type}** - {description}")
+            has_missing = True
+
+    # Show any collected docs not in expected list
+    expected_types = {e[0] for e in expected}
+    extra = {t: c for t, c in collected_types.items() if t not in expected_types}
+    if extra:
+        lines.append("\n## Additional Documents Collected\n")
+        for doc_type, count in sorted(extra.items()):
+            lines.append(f"- [x] **{doc_type}** ({count} collected)")
+
+    lines.append(f"\n**Total collected:** {len(docs)} documents")
+
+    if has_missing:
+        lines.append("\nMissing documents? Use `/collect <file>` to add them.")
+    else:
+        lines.append("\nAll expected documents collected!")
+
+    if not profile:
+        lines.append(
+            "\n*Set up a taxpayer profile for a more personalized checklist.*"
+        )
+
+    return "\n".join(lines)
+
+
+# ============================================================================
 # Register all commands
 # ============================================================================
 
@@ -1543,6 +1751,9 @@ def _register_all_commands() -> None:
     register_command("forget", "Delete a specific memory", cmd_forget, usage="<memory_id>")
     # Tax context steering document
     register_command("context", "Manage tax context file", cmd_context, ["ctx"], usage="[show|create|edit|info|reset]")
+    # Deadlines and checklist
+    register_command("deadlines", "Show tax filing deadlines", cmd_deadlines, ["due"], usage="[--all]")
+    register_command("checklist", "Document collection checklist", cmd_checklist, ["check"])
 
 
 # Auto-register on import

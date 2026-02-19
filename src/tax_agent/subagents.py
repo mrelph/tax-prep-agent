@@ -65,7 +65,13 @@ STOCK_COMPENSATION_ANALYST = SubagentDefinition(
 When analyzing, use tools to:
 - Read 1099-B transactions for equity sales
 - Search for W-2 Box 12 codes (V for NSO, 14 for ISO AMT)
-- Detect wash sales in transaction patterns""",
+- Detect wash sales in transaction patterns
+
+## UNCERTAINTY PROTOCOL
+- If data is missing or ambiguous, say so explicitly rather than guessing
+- Rate your confidence (HIGH/MEDIUM/LOW) for each finding
+- Flag items that need taxpayer confirmation with [NEEDS CONFIRMATION]
+- Never fabricate amounts or assume values not in the source documents""",
     allowed_tools=[
         "Read",
         "Grep",
@@ -138,7 +144,13 @@ Consider recommending bunching strategies if itemized is close to standard:
 - Accelerate charitable giving
 - Bunch medical procedures
 
-When searching, use grep to find specific patterns in documents and calculate potential tax savings.""",
+When searching, use grep to find specific patterns in documents and calculate potential tax savings.
+
+## UNCERTAINTY PROTOCOL
+- If data is missing or ambiguous, say so explicitly rather than guessing
+- Rate your confidence (HIGH/MEDIUM/LOW) for each finding
+- Flag items that need taxpayer confirmation with [NEEDS CONFIRMATION]
+- Never fabricate amounts or assume values not in the source documents""",
     allowed_tools=[
         "Read",
         "Grep",
@@ -205,7 +217,13 @@ Think like an IRS examiner. Look for:
 - **WARNING**: Should investigate (unusual pattern, possible mistake)
 - **SUGGESTION**: Could improve (optimization opportunity)
 
-Cross-reference everything against source documents using Read and Grep tools.""",
+Cross-reference everything against source documents using Read and Grep tools.
+
+## UNCERTAINTY PROTOCOL
+- If data is missing or ambiguous, say so explicitly rather than guessing
+- Rate your confidence (HIGH/MEDIUM/LOW) for each finding
+- Flag items that need taxpayer confirmation with [NEEDS CONFIRMATION]
+- Never fabricate amounts or assume values not in the source documents""",
     allowed_tools=[
         "Read",
         "Grep",
@@ -267,7 +285,13 @@ INVESTMENT_TAX_ANALYST = SubagentDefinition(
 - Box E: Long-term, basis not reported
 - Box F: Long-term, no 1099-B
 
-Use tools to analyze transaction patterns and detect issues.""",
+Use tools to analyze transaction patterns and detect issues.
+
+## UNCERTAINTY PROTOCOL
+- If data is missing or ambiguous, say so explicitly rather than guessing
+- Rate your confidence (HIGH/MEDIUM/LOW) for each finding
+- Flag items that need taxpayer confirmation with [NEEDS CONFIRMATION]
+- Never fabricate amounts or assume values not in the source documents""",
     allowed_tools=[
         "Read",
         "Grep",
@@ -331,7 +355,13 @@ Consider:
 - Form 1099-R: Distributions
 - Box 7 codes critical for treatment
 
-Use tools to verify contribution limits and analyze optimization opportunities.""",
+Use tools to verify contribution limits and analyze optimization opportunities.
+
+## UNCERTAINTY PROTOCOL
+- If data is missing or ambiguous, say so explicitly rather than guessing
+- Rate your confidence (HIGH/MEDIUM/LOW) for each finding
+- Flag items that need taxpayer confirmation with [NEEDS CONFIRMATION]
+- Never fabricate amounts or assume values not in the source documents""",
     allowed_tools=[
         "Read",
         "Grep",
@@ -392,7 +422,13 @@ SELF_EMPLOYMENT_SPECIALIST = SubagentDefinition(
 - Safe harbor: 100% of prior year (110% if AGI > $150k)
 - Avoid underpayment penalty
 
-Use tools to verify income reporting and identify missed deductions.""",
+Use tools to verify income reporting and identify missed deductions.
+
+## UNCERTAINTY PROTOCOL
+- If data is missing or ambiguous, say so explicitly rather than guessing
+- Rate your confidence (HIGH/MEDIUM/LOW) for each finding
+- Flag items that need taxpayer confirmation with [NEEDS CONFIRMATION]
+- Never fabricate amounts or assume values not in the source documents""",
     allowed_tools=[
         "Read",
         "Grep",

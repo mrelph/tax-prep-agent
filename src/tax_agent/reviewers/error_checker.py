@@ -139,21 +139,24 @@ class ReturnReviewer:
 
 {f"SOURCE DOCUMENTS:{chr(10)}{source_summary}" if source_summary != "No source documents available for comparison." else ""}
 
-For each finding, use this format:
-**ERROR**: [title]
-- Description of the issue
-- Impact: $X (if calculable)
-- Recommendation: What to do
+Return your findings as a JSON array. Each finding must have these fields:
+- "severity": one of "error", "warning", "suggestion", "info"
+- "category": e.g. "income", "deduction", "credit", "compliance", "optimization"
+- "title": brief title
+- "description": detailed description
+- "recommendation": what to do (optional)
+- "potential_impact": dollar amount as number, no $ sign (optional)
+- "line_reference": form line reference like "1040 Line 1" (optional)
 
-**WARNING**: [title]
-- Description
-- Recommendation
+Example format:
+```json
+[
+  {{"severity": "error", "category": "income", "title": "Missing W-2 income", "description": "...", "recommendation": "...", "potential_impact": 1500}}
+]
+```
 
-**SUGGESTION**: [title]
-- Description
-- Potential savings: $X
-
-Be thorough but only report genuine issues. Don't fabricate problems."""
+Be thorough but only report genuine issues. Don't fabricate problems.
+Return ONLY the JSON array, no other text."""
 
         # Build message with images (first 5 pages)
         content = []
@@ -369,13 +372,88 @@ List any missed deductions or optimization opportunities as:
         return findings
 
     def _parse_ai_findings(self, ai_response: str) -> list[ReviewFinding]:
-        """Parse AI review response into structured findings."""
+        """Parse AI review response into structured findings.
+
+        Tries JSON parsing first, falls back to text parsing for older-style responses.
+        """
+        # Try JSON parsing first
+        findings = self._parse_json_findings(ai_response)
+        if findings:
+            return findings
+
+        # Fall back to text-based parsing
+        return self._parse_text_findings(ai_response)
+
+    def _parse_json_findings(self, ai_response: str) -> list[ReviewFinding]:
+        """Parse JSON-formatted AI findings."""
+        import re
+
+        text = ai_response.strip()
+
+        # Strip markdown code fences if present
+        if "```" in text:
+            match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+            if match:
+                text = match.group(1).strip()
+
+        # Find JSON array in the response
+        bracket_start = text.find("[")
+        bracket_end = text.rfind("]")
+        if bracket_start < 0 or bracket_end < 0:
+            return []
+
+        try:
+            items = json.loads(text[bracket_start:bracket_end + 1])
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(items, list):
+            return []
+
+        severity_map = {
+            "error": ReviewSeverity.ERROR,
+            "warning": ReviewSeverity.WARNING,
+            "suggestion": ReviewSeverity.SUGGESTION,
+            "opportunity": ReviewSeverity.SUGGESTION,
+            "info": ReviewSeverity.INFO,
+        }
+
         findings: list[ReviewFinding] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            sev_str = str(item.get("severity", "info")).lower()
+            severity = severity_map.get(sev_str, ReviewSeverity.INFO)
 
-        # Try to extract structured findings from the AI response
-        # The AI is prompted to provide structured output, but we'll handle
-        # unstructured responses gracefully
+            impact = item.get("potential_impact")
+            if impact is not None:
+                try:
+                    impact = float(str(impact).replace("$", "").replace(",", ""))
+                except (ValueError, TypeError):
+                    impact = None
 
+            findings.append(
+                ReviewFinding(
+                    severity=severity,
+                    category=item.get("category", "general"),
+                    title=item.get("title", "Finding"),
+                    description=item.get("description", ""),
+                    line_reference=item.get("line_reference"),
+                    expected_value=item.get("expected_value"),
+                    actual_value=item.get("actual_value"),
+                    recommendation=item.get("recommendation"),
+                    potential_impact=impact,
+                    source_document_id=item.get("source_document_id"),
+                )
+            )
+
+        return findings
+
+    def _parse_text_findings(self, ai_response: str) -> list[ReviewFinding]:
+        """Fall back text parser for unstructured AI responses."""
+        import re
+
+        findings: list[ReviewFinding] = []
         lines = ai_response.split("\n")
         current_finding: dict = {}
 
@@ -383,14 +461,13 @@ List any missed deductions or optimization opportunities as:
             "error": ReviewSeverity.ERROR,
             "warning": ReviewSeverity.WARNING,
             "suggestion": ReviewSeverity.SUGGESTION,
-            "opportunity": ReviewSeverity.SUGGESTION,  # Map opportunity to suggestion
+            "opportunity": ReviewSeverity.SUGGESTION,
             "info": ReviewSeverity.INFO,
         }
 
         for line in lines:
             line_lower = line.lower().strip()
 
-            # Look for severity markers
             for sev_name, sev_enum in severity_map.items():
                 if line_lower.startswith(f"**{sev_name}") or line_lower.startswith(f"#{sev_name}"):
                     if current_finding and "title" in current_finding:
@@ -399,19 +476,17 @@ List any missed deductions or optimization opportunities as:
                                 severity=current_finding.get("severity", ReviewSeverity.INFO),
                                 category=current_finding.get("category", "general"),
                                 title=current_finding.get("title", "Finding"),
-                                description=current_finding.get("description", ""),
+                                description=current_finding.get("description", "").strip(),
                                 recommendation=current_finding.get("recommendation"),
                                 potential_impact=current_finding.get("impact"),
                             )
                         )
                     current_finding = {"severity": sev_enum}
-                    # Extract title from the same line if present
                     rest = line.split(":", 1)
                     if len(rest) > 1:
                         current_finding["title"] = rest[1].strip()
                     break
 
-            # Accumulate description
             if current_finding and "severity" in current_finding:
                 if "description" not in current_finding:
                     current_finding["description"] = ""
@@ -423,15 +498,11 @@ List any missed deductions or optimization opportunities as:
                 ):
                     current_finding["description"] += line.strip() + " "
 
-                # Look for recommendation
                 if "recommendation:" in line_lower:
                     current_finding["recommendation"] = line.split(":", 1)[1].strip()
 
-                # Look for impact
                 if "impact:" in line_lower or "savings:" in line_lower:
                     try:
-                        # Try to extract dollar amount
-                        import re
                         match = re.search(r"\$[\d,]+", line)
                         if match:
                             amount = float(match.group().replace("$", "").replace(",", ""))
@@ -439,7 +510,6 @@ List any missed deductions or optimization opportunities as:
                     except (ValueError, AttributeError):
                         pass
 
-        # Don't forget the last finding
         if current_finding and "title" in current_finding:
             findings.append(
                 ReviewFinding(
@@ -452,7 +522,6 @@ List any missed deductions or optimization opportunities as:
                 )
             )
 
-        # If no structured findings were parsed, create a general one from the response
         if not findings and ai_response.strip():
             findings.append(
                 ReviewFinding(
