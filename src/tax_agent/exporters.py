@@ -171,7 +171,7 @@ def export_documents_markdown(documents: list, tax_year: int) -> str:
                 lines.append("")
                 for key, value in doc.extracted_data.items():
                     if value is not None:
-                        if isinstance(value, (int, float)) and "amount" in key.lower() or "box" in key.lower():
+                        if isinstance(value, (int, float)) and ("amount" in key.lower() or "box" in key.lower()):
                             lines.append(f"- **{key}:** ${value:,.2f}")
                         else:
                             lines.append(f"- **{key}:** {value}")

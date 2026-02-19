@@ -135,6 +135,7 @@ async def ssn_redaction_hook(
     # SSN patterns to redact
     ssn_patterns = [
         r"\b\d{3}-\d{2}-\d{4}\b",  # XXX-XX-XXXX
+        r"\b\d{3}\s\d{2}\s\d{4}\b",  # XXX XX XXXX (common on W-2 forms)
         r"\b\d{9}\b",  # XXXXXXXXX (only if surrounded by word boundaries)
     ]
 
@@ -261,18 +262,18 @@ def get_tax_hooks() -> dict:
     """
     return {
         "PreToolUse": [
-            # Always run these
-            audit_log_hook,
-            # Security guards
+            # Security guards run first to block before logging
             sensitive_data_guard,
             web_access_guard,
+            # Audit after guards so blocked attempts aren't logged with sensitive paths
+            audit_log_hook,
         ],
         "PostToolUse": [
-            # Audit
-            audit_log_hook,
-            # Data protection
+            # Data protection runs first so audit sees redacted output
             ssn_redaction_hook,
             ein_redaction_hook,
+            # Audit after redaction
+            audit_log_hook,
             # Monitoring
             rate_limit_hook,
         ],

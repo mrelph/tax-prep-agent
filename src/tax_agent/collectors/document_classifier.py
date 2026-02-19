@@ -157,6 +157,16 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         use_vision = self.config.get("use_vision", True)
 
         if use_vision:
+            # Note: Vision mode sends the full document image to the API.
+            # SSN redaction cannot be applied to images before sending.
+            if self.config.get("auto_redact_ssn", True):
+                import logging
+                logging.getLogger("tax_agent").info(
+                    "Vision mode sends document images directly to the API. "
+                    "SSN redaction only applies to stored text, not the image itself. "
+                    "Set use_vision=false for full pre-API redaction."
+                )
+
             # Use Claude Vision for classification and extraction
             classification = self.agent.classify_document_with_vision(str(file_path))
 
@@ -252,6 +262,10 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         classified_year = classification.get("tax_year")
         if classified_year and isinstance(classified_year, int):
             tax_year = classified_year
+
+        # Redact sensitive data from raw_text before storing in DB
+        if self.config.get("auto_redact_ssn", True):
+            raw_text = redact_sensitive_data(raw_text)
 
         # Create the document
         document = TaxDocument(

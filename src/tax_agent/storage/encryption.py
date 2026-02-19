@@ -63,12 +63,15 @@ def redact_ssn(text: str) -> str:
     """
     import re
 
-    # Pattern for SSN with dashes
+    # Pattern for SSN with dashes: XXX-XX-XXXX
     pattern_dashed = r"\b\d{3}-\d{2}-\d{4}\b"
-    # Pattern for SSN without dashes
+    # Pattern for SSN with spaces: XXX XX XXXX (common on W-2 forms)
+    pattern_spaced = r"\b\d{3}\s\d{2}\s\d{4}\b"
+    # Pattern for SSN without dashes: XXXXXXXXX
     pattern_nodash = r"\b\d{9}\b"
 
     text = re.sub(pattern_dashed, "[SSN REDACTED]", text)
+    text = re.sub(pattern_spaced, "[SSN REDACTED]", text)
     text = re.sub(pattern_nodash, "[SSN REDACTED]", text)
     return text
 

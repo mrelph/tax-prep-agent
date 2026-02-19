@@ -53,7 +53,7 @@ def get_tax_year_context(tax_year: int, state: str | None = None) -> str:
     context_lines = [
         f"TAX YEAR: {tax_year}",
         "",
-        "KEY {tax_year} FEDERAL TAX RULES:",
+        f"KEY {tax_year} FEDERAL TAX RULES:",
     ]
 
     rules = load_tax_rules(tax_year)

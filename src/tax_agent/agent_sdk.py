@@ -187,12 +187,14 @@ class TaxAgentSDK:
         # Use subagent's model or default
         model = subagent.model or self.model
 
+        hooks = self._get_hooks()
         options = ClaudeCodeOptions(
             system_prompt=subagent.system_prompt,
             allowed_tools=subagent.allowed_tools,
             max_turns=subagent.max_turns,
             model=model,
             cwd=str(source_dir) if source_dir else None,
+            **({"hooks": hooks} if hooks else {}),
         )
 
         async for message in query(prompt=prompt, options=options):
@@ -239,11 +241,13 @@ class TaxAgentSDK:
 
         from claude_code_sdk import query, ClaudeCodeOptions
 
+        hooks = self._get_hooks()
         options = ClaudeCodeOptions(
             system_prompt=TAX_DOCUMENT_CLASSIFIER_PROMPT,
             allowed_tools=["Read", "Grep"] if file_path else [],
             max_turns=3,
             model=self.model,
+            **({"hooks": hooks} if hooks else {}),
         )
 
         prompt = f"""Classify this tax document and return a JSON object with:
@@ -296,12 +300,14 @@ Document text:
 
         from claude_code_sdk import query, ClaudeCodeOptions
 
+        hooks = self._get_hooks()
         options = ClaudeCodeOptions(
             system_prompt=TAX_ANALYSIS_PROMPT,
             allowed_tools=self._get_allowed_tools(include_web=True),
             max_turns=self.max_turns,
             model=self.model,
             cwd=str(source_dir) if source_dir else None,
+            **({"hooks": hooks} if hooks else {}),
         )
 
         prompt = f"""Analyze this taxpayer's situation. Verify key figures by reading
@@ -346,12 +352,14 @@ Provide comprehensive analysis with verification of key figures."""
 
         from claude_code_sdk import query, ClaudeCodeOptions
 
+        hooks = self._get_hooks()
         options = ClaudeCodeOptions(
             system_prompt=TAX_REVIEW_PROMPT,
             allowed_tools=self._get_allowed_tools(include_web=True),
             max_turns=self.max_turns,
             model=self.model,
             cwd=str(source_dir) if source_dir else None,
+            **({"hooks": hooks} if hooks else {}),
         )
 
         prompt = f"""Review this tax return against source documents.
@@ -399,12 +407,14 @@ You can read files, search for patterns, and look up current tax information.
 Provide specific, actionable advice based on the taxpayer's situation.
 Always verify your recommendations against source documents when available."""
 
+        hooks = self._get_hooks()
         options = ClaudeCodeOptions(
             system_prompt=system_prompt,
             allowed_tools=self._get_allowed_tools(include_web=True),
             max_turns=self.max_turns,
             model=self.model,
             cwd=str(source_dir) if source_dir else None,
+            **({"hooks": hooks} if hooks else {}),
         )
 
         full_prompt = query_text

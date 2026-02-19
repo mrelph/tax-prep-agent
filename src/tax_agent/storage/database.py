@@ -41,11 +41,16 @@ class TaxDatabase:
             import sqlcipher3 as sqlite3_encrypted
 
             conn = sqlite3_encrypted.connect(str(self.db_path))
-            conn.execute(f"PRAGMA key = '{self._password}'")
+            conn.execute("PRAGMA key = ?", (self._password,))
             # Use sqlcipher3's Row class for compatibility
             conn.row_factory = sqlite3_encrypted.Row
         except ImportError:
-            # Fall back to regular sqlite (unencrypted) for development
+            import logging
+            logging.getLogger("tax_agent").warning(
+                "WARNING: sqlcipher3 is not installed. Database will NOT be encrypted. "
+                "All tax data (including SSNs) will be stored in plaintext. "
+                "Install sqlcipher3-binary to enable encryption: pip install sqlcipher3-binary"
+            )
             conn = sqlite3.connect(str(self.db_path))
             conn.row_factory = sqlite3.Row
 
