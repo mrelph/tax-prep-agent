@@ -17,6 +17,10 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from tax_agent.config import get_config
+from tax_agent.env import load_env
+
+# Load .env file early so all env vars are available
+load_env()
 
 
 def async_command(f):
@@ -3245,6 +3249,33 @@ def config_api_key() -> None:
 
     config.set_api_key(api_key)
     rprint("[green]API key updated successfully.[/green]")
+
+
+@config_app.command("brave-key")
+def config_brave_key() -> None:
+    """Set up Brave Search API key for web research.
+
+    Get a free API key at https://brave.com/search/api/
+    Saves the key to .env in the project root.
+    """
+    from tax_agent.env import get_env_path, write_env_key
+
+    rprint("[cyan]Brave Search enables real-time tax research (IRS rules, law changes, state rules).[/cyan]")
+    rprint("[dim]Get a free API key at: https://brave.com/search/api/[/dim]\n")
+
+    api_key = Prompt.ask(
+        "[bold]Enter your Brave Search API key[/bold]",
+        password=True,
+    )
+
+    if not api_key.strip():
+        rprint("[yellow]No key entered. Brave Search not configured.[/yellow]")
+        return
+
+    env_path = get_env_path()
+    write_env_key(env_path, "BRAVE_API_KEY", api_key.strip())
+    rprint(f"[green]Brave Search API key saved to {env_path}[/green]")
+    rprint("[green]Web research is now enabled.[/green]")
 
 
 # Research subcommands

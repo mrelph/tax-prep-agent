@@ -41,6 +41,7 @@ dependencies = [
     "google-api-python-client>=2.118.0",  # For Google Drive API
     "fpdf2>=2.7.0",  # For PDF report generation
     "prompt_toolkit>=3.0.0",  # For interactive mode with autocomplete
+    "httpx>=0.27.0",  # For Brave Search API calls
 ]
 
 [project.optional-dependencies]

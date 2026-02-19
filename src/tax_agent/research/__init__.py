@@ -5,5 +5,12 @@ from tax_agent.research.tax_researcher import (
     research_tax_topic,
     verify_current_limits,
 )
+from tax_agent.research.web_search import BraveSearchClient, BraveSearchError
 
-__all__ = ["TaxResearcher", "research_tax_topic", "verify_current_limits"]
+__all__ = [
+    "TaxResearcher",
+    "research_tax_topic",
+    "verify_current_limits",
+    "BraveSearchClient",
+    "BraveSearchError",
+]

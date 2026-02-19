@@ -19,6 +19,7 @@ KEYRING_AWS_SECRET_KEY = "aws-secret-access-key"
 KEYRING_DB_PASSWORD = "db-encryption-key"
 KEYRING_GOOGLE_CREDENTIALS = "google-drive-credentials"
 KEYRING_GOOGLE_CLIENT_CONFIG = "google-drive-client-config"
+KEYRING_BRAVE_API_KEY = "brave-search-api-key"
 
 # Supported AI providers
 AI_PROVIDER_ANTHROPIC = "anthropic"
@@ -167,6 +168,29 @@ class Config:
     def has_google_drive_configured(self) -> bool:
         """Check if Google Drive integration is configured."""
         return self.get_google_credentials() is not None
+
+    def get_brave_api_key(self) -> str | None:
+        """Get the Brave Search API key from environment or keyring."""
+        env_key = os.environ.get("BRAVE_API_KEY")
+        if env_key:
+            return env_key
+        return keyring.get_password(KEYRING_SERVICE, KEYRING_BRAVE_API_KEY)
+
+    def set_brave_api_key(self, api_key: str) -> None:
+        """Store the Brave Search API key in the system keyring."""
+        keyring.set_password(KEYRING_SERVICE, KEYRING_BRAVE_API_KEY, api_key)
+
+    def clear_brave_api_key(self) -> None:
+        """Remove the Brave Search API key from the keyring."""
+        try:
+            keyring.delete_password(KEYRING_SERVICE, KEYRING_BRAVE_API_KEY)
+        except keyring.errors.PasswordDeleteError:
+            pass
+
+    @property
+    def brave_search_enabled(self) -> bool:
+        """Check if Brave Search is configured."""
+        return self.get_brave_api_key() is not None
 
     @property
     def ai_provider(self) -> str:
