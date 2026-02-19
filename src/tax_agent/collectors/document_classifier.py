@@ -309,8 +309,13 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
             return self.agent.extract_1099_div_data(text)
         elif doc_type == DocumentType.FORM_1099_B:
             return self.agent.extract_1099_b_data(text)
+        elif doc_type == DocumentType.FORM_1099_NEC:
+            return self.agent.extract_1099_nec_data(text)
+        elif doc_type == DocumentType.FORM_1099_R:
+            return self.agent.extract_1099_r_data(text)
+        elif doc_type == DocumentType.FORM_1098:
+            return self.agent.extract_1098_data(text)
         else:
-            # For other types, just return the classification info
             return {}
 
     def process_directory(

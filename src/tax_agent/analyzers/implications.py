@@ -24,17 +24,81 @@ def _get_sdk_agent():
     return None
 
 
+def _build_bracket_list(cumulative_brackets: list[tuple[float, float]]) -> list[dict]:
+    """Convert (threshold, rate) tuples to {min, max, rate} bracket dicts."""
+    result = []
+    prev_max = 0
+    for threshold, rate in cumulative_brackets:
+        result.append({
+            "min": prev_max,
+            "max": None if threshold == float("inf") else threshold,
+            "rate": rate,
+        })
+        prev_max = threshold
+    return result
+
+
+def _get_fallback_rules(tax_year: int) -> dict[str, Any]:
+    """Get hardcoded tax rules when YAML files are unavailable."""
+    from tax_agent.tools.tax_calculations import (
+        TAX_BRACKETS_2024,
+        TAX_BRACKETS_2025,
+        STANDARD_DEDUCTIONS,
+    )
+
+    brackets_src = TAX_BRACKETS_2025 if tax_year >= 2025 else TAX_BRACKETS_2024
+    deductions_src = STANDARD_DEDUCTIONS.get(tax_year, STANDARD_DEDUCTIONS[2024])
+
+    brackets = {
+        status: _build_bracket_list(rates)
+        for status, rates in brackets_src.items()
+    }
+
+    # Long-term capital gains brackets (2024)
+    cap_gains = {
+        "long_term": {
+            "single": _build_bracket_list([
+                (47025, 0.0), (518900, 0.15), (float("inf"), 0.20),
+            ]),
+            "married_filing_jointly": _build_bracket_list([
+                (94050, 0.0), (583750, 0.15), (float("inf"), 0.20),
+            ]),
+            "head_of_household": _build_bracket_list([
+                (63000, 0.0), (551350, 0.15), (float("inf"), 0.20),
+            ]),
+        }
+    }
+
+    return {
+        "standard_deduction": {k: v for k, v in deductions_src.items() if not k.startswith("additional")},
+        "brackets": brackets,
+        "capital_gains": cap_gains,
+        "retirement_401k": {"employee_contribution_limit": 23000 if tax_year <= 2024 else 23500},
+        "ira": {"contribution_limit": 7000},
+    }
+
+
 def load_tax_rules(tax_year: int = 2024) -> dict[str, Any]:
-    """Load federal tax rules for a given year."""
+    """Load federal tax rules for a given year.
+
+    Falls back to hardcoded values from tax_calculations.py if YAML files
+    are not available (e.g. in CI or fresh deployments).
+    """
     rules_dir = Path(__file__).parent.parent.parent.parent / "data" / "tax_rules"
     rules_file = rules_dir / f"federal_{tax_year}.yaml"
 
     if not rules_file.exists():
-        # Fall back to most recent year
         rules_file = rules_dir / "federal_2024.yaml"
 
-    with open(rules_file) as f:
-        return yaml.safe_load(f)
+    try:
+        with open(rules_file) as f:
+            return yaml.safe_load(f)
+    except (FileNotFoundError, OSError):
+        import logging
+        logging.getLogger("tax_agent").info(
+            f"Tax rules YAML not found for {tax_year}, using hardcoded fallback"
+        )
+        return _get_fallback_rules(tax_year)
 
 
 def load_state_rules(state: str, tax_year: int = 2024) -> dict[str, Any] | None:
@@ -188,42 +252,52 @@ class TaxAnalyzer:
         if isinstance(filing_status, FilingStatus):
             filing_status = filing_status.value
 
-        # Calculate total ordinary income
-        ordinary_income = (
+        # Total income includes all dividends (qualified are a subset of ordinary)
+        total_income = (
             income["wages"]
             + income["interest"]
             + income["dividends_ordinary"]
-            - income["dividends_qualified"]  # Qualified dividends taxed at cap gains rates
             + income["capital_gains_short"]
+            + income["capital_gains_long"]
             + income["other"]
         )
 
         # Get standard deduction
         standard_deduction = self.rules["standard_deduction"].get(filing_status, 14600)
 
-        # Taxable ordinary income
-        taxable_ordinary = max(0, ordinary_income - standard_deduction)
+        # Taxable income after standard deduction
+        taxable_income = max(0, total_income - standard_deduction)
+
+        # Preferential income (qualified dividends + long-term gains)
+        # Cannot exceed total taxable income (standard deduction may shelter some)
+        preferential_income = min(
+            income["dividends_qualified"] + income["capital_gains_long"],
+            taxable_income,
+        )
+
+        # Ordinary portion = taxable income minus preferential portion
+        taxable_ordinary = taxable_income - preferential_income
 
         # Calculate ordinary income tax using brackets
         brackets = self.rules["brackets"].get(filing_status, self.rules["brackets"]["single"])
         ordinary_tax = self._calculate_tax_from_brackets(taxable_ordinary, brackets)
 
-        # Calculate capital gains tax
-        qualified_and_long_term = income["dividends_qualified"] + income["capital_gains_long"]
+        # Calculate preferential rate tax (qualified dividends + long-term gains)
         cap_gains_brackets = self.rules["capital_gains"]["long_term"].get(
             filing_status, self.rules["capital_gains"]["long_term"]["single"]
         )
-        cap_gains_tax = self._calculate_tax_from_brackets(qualified_and_long_term, cap_gains_brackets)
+        cap_gains_tax = self._calculate_tax_from_brackets(preferential_income, cap_gains_brackets)
 
         # Total tax
         total_tax = ordinary_tax + cap_gains_tax
 
         return {
-            "ordinary_income": ordinary_income,
+            "total_income": total_income,
+            "taxable_income": taxable_income,
             "taxable_ordinary_income": taxable_ordinary,
             "standard_deduction": standard_deduction,
             "ordinary_income_tax": ordinary_tax,
-            "capital_gains_income": qualified_and_long_term,
+            "capital_gains_income": preferential_income,
             "capital_gains_tax": cap_gains_tax,
             "total_tax": total_tax,
         }

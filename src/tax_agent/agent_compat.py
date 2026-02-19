@@ -351,19 +351,66 @@ class CompatibleAgent:
         else:
             yield self.interactive_query(query_text, context, source_dir)
 
-    # Legacy-only methods (passthrough)
+    # SDK-enhanced methods with legacy fallback
+
+    def _sdk_query_with_fallback(
+        self,
+        prompt: str,
+        context: dict,
+        legacy_fn,
+        legacy_args: tuple,
+    ):
+        """Route through SDK interactive_query with legacy fallback."""
+        if self._use_sdk():
+            import json
+            try:
+                result = self.sdk_agent.interactive_query(prompt, context)
+                # Try to parse JSON from response
+                text = result.strip()
+                if "```" in text:
+                    import re
+                    match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+                    if match:
+                        text = match.group(1).strip()
+                brace_start = text.find("{")
+                brace_end = text.rfind("}")
+                if brace_start >= 0 and brace_end > brace_start:
+                    return json.loads(text[brace_start:brace_end + 1])
+                return {"analysis": result}
+            except Exception:
+                pass
+        return legacy_fn(*legacy_args)
 
     def validate_documents_cross_reference(self, documents_data: list[dict]) -> dict:
-        """Cross-validate documents (legacy only)."""
-        return self.legacy_agent.validate_documents_cross_reference(documents_data)
+        """Cross-validate documents for consistency."""
+        import json
+        return self._sdk_query_with_fallback(
+            prompt=(
+                "Cross-validate these tax documents for consistency. "
+                "Check that amounts match across related documents (e.g. W-2 wages vs 1040 Line 1). "
+                "Return a JSON object with 'consistent' (bool), 'discrepancies' (list), and 'summary'."
+            ),
+            context={"documents": documents_data},
+            legacy_fn=self.legacy_agent.validate_documents_cross_reference,
+            legacy_args=(documents_data,),
+        )
 
     def assess_audit_risk(
         self,
         return_summary: dict,
         documents_summary: dict,
     ) -> dict:
-        """Assess audit risk (legacy only)."""
-        return self.legacy_agent.assess_audit_risk(return_summary, documents_summary)
+        """Assess audit risk based on return data."""
+        return self._sdk_query_with_fallback(
+            prompt=(
+                "Assess the audit risk for this tax return. Consider DIF scores, "
+                "unusual deduction ratios, round numbers, and IRS matching program triggers. "
+                "Return JSON with 'risk_level', 'risk_score' (1-10), 'flags' (list), and 'recommendations'."
+            ),
+            context={"return_summary": return_summary, "documents": documents_summary},
+            legacy_fn=self.legacy_agent.assess_audit_risk,
+            legacy_args=(return_summary, documents_summary),
+        )
 
     def compare_filing_scenarios(
         self,
@@ -371,11 +418,17 @@ class CompatibleAgent:
         deductions_data: dict,
         tax_year: int,
     ) -> dict:
-        """Compare filing scenarios (legacy only)."""
-        return self.legacy_agent.compare_filing_scenarios(
-            income_data,
-            deductions_data,
-            tax_year,
+        """Compare filing scenarios (e.g. standard vs itemized, MFJ vs MFS)."""
+        return self._sdk_query_with_fallback(
+            prompt=(
+                f"Compare filing scenarios for tax year {tax_year}. "
+                "Analyze standard vs itemized deductions, and if married, MFJ vs MFS. "
+                "Return JSON with 'scenarios' (list of {name, tax_liability, refund}), "
+                "'recommended', and 'savings'."
+            ),
+            context={"income": income_data, "deductions": deductions_data, "tax_year": tax_year},
+            legacy_fn=self.legacy_agent.compare_filing_scenarios,
+            legacy_args=(income_data, deductions_data, tax_year),
         )
 
     def analyze_investment_taxes(
@@ -383,16 +436,37 @@ class CompatibleAgent:
         transactions: list[dict],
         holdings: list[dict] | None = None,
     ) -> dict:
-        """Analyze investment taxes (legacy only)."""
-        return self.legacy_agent.analyze_investment_taxes(transactions, holdings)
+        """Analyze investment taxes including wash sales and optimization."""
+        return self._sdk_query_with_fallback(
+            prompt=(
+                "Analyze these investment transactions for tax implications. "
+                "Check for wash sales, identify tax-loss harvesting opportunities, "
+                "and classify short-term vs long-term gains. "
+                "Return JSON with 'total_gain_loss', 'wash_sales', 'harvesting_opportunities', "
+                "and 'recommendations'."
+            ),
+            context={"transactions": transactions, "holdings": holdings or []},
+            legacy_fn=self.legacy_agent.analyze_investment_taxes,
+            legacy_args=(transactions, holdings),
+        )
 
     def identify_missing_documents(
         self,
         collected_docs: list[dict],
         tax_profile: dict,
     ) -> dict:
-        """Identify missing documents (legacy only)."""
-        return self.legacy_agent.identify_missing_documents(collected_docs, tax_profile)
+        """Identify potentially missing tax documents."""
+        return self._sdk_query_with_fallback(
+            prompt=(
+                "Based on this taxpayer's profile and collected documents, "
+                "identify any documents that are likely missing. "
+                "Return JSON with 'missing' (list of {type, reason, importance}), "
+                "'complete' (bool), and 'recommendations'."
+            ),
+            context={"collected_documents": collected_docs, "taxpayer_profile": tax_profile},
+            legacy_fn=self.legacy_agent.identify_missing_documents,
+            legacy_args=(collected_docs, tax_profile),
+        )
 
     def deep_document_analysis(
         self,
@@ -400,11 +474,18 @@ class CompatibleAgent:
         extracted_data: dict,
         raw_text: str,
     ) -> dict:
-        """Deep document analysis (legacy only)."""
-        return self.legacy_agent.deep_document_analysis(
-            document_type,
-            extracted_data,
-            raw_text,
+        """Perform deep analysis of a specific document."""
+        return self._sdk_query_with_fallback(
+            prompt=(
+                f"Perform a deep analysis of this {document_type} document. "
+                "Verify extracted amounts, identify unusual entries, "
+                "and flag anything that needs attention. "
+                "Return JSON with 'verified' (bool), 'issues' (list), "
+                "'additional_data' (any missed fields), and 'notes'."
+            ),
+            context={"document_type": document_type, "extracted_data": extracted_data},
+            legacy_fn=self.legacy_agent.deep_document_analysis,
+            legacy_args=(document_type, extracted_data, raw_text),
         )
 
     def generate_tax_planning_recommendations(
@@ -412,10 +493,19 @@ class CompatibleAgent:
         current_year_data: dict,
         profile: dict,
     ) -> dict:
-        """Generate tax planning recommendations (legacy only)."""
-        return self.legacy_agent.generate_tax_planning_recommendations(
-            current_year_data,
-            profile,
+        """Generate tax planning recommendations."""
+        return self._sdk_query_with_fallback(
+            prompt=(
+                "Generate specific, actionable tax planning recommendations "
+                "based on this taxpayer's current year data and profile. "
+                "Consider retirement contributions, Roth conversions, "
+                "estimated payments, and timing strategies. "
+                "Return JSON with 'recommendations' (list of {title, description, "
+                "estimated_savings, priority}), and 'summary'."
+            ),
+            context={"current_year": current_year_data, "profile": profile},
+            legacy_fn=self.legacy_agent.generate_tax_planning_recommendations,
+            legacy_args=(current_year_data, profile),
         )
 
 

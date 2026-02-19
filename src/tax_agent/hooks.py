@@ -198,23 +198,82 @@ async def ein_redaction_hook(
     return {}
 
 
+# Per-session tool invocation counters
+_tool_counters: dict[str, int] = {}
+
+# Default limits (can be overridden via config)
+_DEFAULT_LIMITS = {
+    "WebSearch": 10,
+    "WebFetch": 10,
+    "_total": 100,
+}
+
+
+def reset_rate_limits() -> None:
+    """Reset rate limit counters (call at start of new agent run)."""
+    _tool_counters.clear()
+
+
 async def rate_limit_hook(
     input_data: dict,
     tool_use_id: str | None,
     context: Any,
 ) -> dict:
     """
-    Track tool usage for rate limiting.
+    Track and enforce tool usage limits per agent run.
 
-    This hook tracks how many tools have been invoked in the
-    current session to prevent runaway API usage.
+    Denies tool calls that exceed configured thresholds to
+    prevent runaway API usage.
     """
-    # This would typically use shared state, but for now we just log
+    if "tool_result" in input_data:
+        return {}
+
     tool_name = input_data.get("tool_name", "unknown")
 
-    # Web tools are more expensive, track them
+    # Increment counters
+    _tool_counters[tool_name] = _tool_counters.get(tool_name, 0) + 1
+    _tool_counters["_total"] = _tool_counters.get("_total", 0) + 1
+
+    # Get limits from config or use defaults
+    config = get_config()
+    limits = {
+        **_DEFAULT_LIMITS,
+        **config.get("rate_limits", {}),
+    }
+
+    # Check tool-specific limit
+    tool_limit = limits.get(tool_name)
+    if tool_limit and _tool_counters[tool_name] > tool_limit:
+        logger.warning(f"Rate limit exceeded for {tool_name}: {_tool_counters[tool_name]}/{tool_limit}")
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"Rate limit exceeded for {tool_name} "
+                    f"({_tool_counters[tool_name]}/{tool_limit} calls). "
+                    f"Adjust with: tax-agent config set rate_limits.{tool_name} <limit>"
+                ),
+            }
+        }
+
+    # Check total limit
+    total_limit = limits.get("_total", 100)
+    if _tool_counters["_total"] > total_limit:
+        logger.warning(f"Total tool rate limit exceeded: {_tool_counters['_total']}/{total_limit}")
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"Total tool call limit exceeded "
+                    f"({_tool_counters['_total']}/{total_limit} calls)."
+                ),
+            }
+        }
+
     if tool_name in ("WebSearch", "WebFetch"):
-        logger.info(f"Web tool invocation: {tool_name}")
+        logger.info(f"Web tool invocation: {tool_name} ({_tool_counters[tool_name]}/{limits.get(tool_name, '?')})")
 
     return {}
 

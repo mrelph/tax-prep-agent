@@ -671,6 +671,109 @@ Use null for any field you cannot find. Only output the JSON object."""
         except json.JSONDecodeError:
             return {}
 
+    def extract_1099_nec_data(self, text: str) -> dict:
+        """Extract structured data from a 1099-NEC form."""
+        system = """You are a tax document data extractor specializing in 1099-NEC forms.
+
+Extract all relevant data and return a JSON object with:
+- payer_name: Name of the payer
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- box_1: Nonemployee compensation (number)
+- box_4: Federal income tax withheld (number or null)
+- box_5: State tax withheld (number or null)
+- state: State abbreviation if present
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1099-NEC data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1099_r_data(self, text: str) -> dict:
+        """Extract structured data from a 1099-R form (retirement distributions)."""
+        system = """You are a tax document data extractor specializing in 1099-R forms.
+
+Extract all relevant data and return a JSON object with:
+- payer_name: Name of the payer (plan administrator)
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- box_1: Gross distribution (number)
+- box_2a: Taxable amount (number or null)
+- box_2b_taxable_not_determined: Whether taxable amount not determined (boolean)
+- box_3: Capital gain (number or null)
+- box_4: Federal income tax withheld (number or null)
+- box_5: Employee contributions or insurance premiums (number or null)
+- box_7_distribution_code: Distribution code (string, e.g. "1", "7", "G")
+- box_7_ira_sep_simple: Whether IRA/SEP/SIMPLE (boolean)
+- box_9b: Total employee contributions (number or null)
+- box_10: Amount allocable to IRR (number or null)
+- state: State abbreviation if present
+- state_tax_withheld: State tax withheld (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1099-R data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1098_data(self, text: str) -> dict:
+        """Extract structured data from a 1098 form (mortgage interest)."""
+        system = """You are a tax document data extractor specializing in 1098 forms.
+
+Extract all relevant data and return a JSON object with:
+- lender_name: Name of the lender/recipient
+- lender_ein: Lender's TIN
+- borrower_ssn_last4: Last 4 digits of borrower SSN only
+- borrower_name: Borrower name
+- box_1: Mortgage interest received (number)
+- box_2: Outstanding mortgage principal (number or null)
+- box_3: Mortgage origination date (string or null)
+- box_4: Refund of overpaid interest (number or null)
+- box_5: Mortgage insurance premiums (number or null)
+- box_6: Points paid on purchase (number or null)
+- box_7: Property address (string or null)
+- box_8: Number of properties securing mortgage (number or null)
+- box_10: Real estate taxes paid (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1098 data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
     def analyze_tax_implications(self, documents_summary: str, taxpayer_info: str) -> str:
         """
         Analyze tax implications based on collected documents.

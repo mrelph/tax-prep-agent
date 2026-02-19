@@ -76,8 +76,6 @@ When analyzing, use tools to:
         "Read",
         "Grep",
         "Glob",
-        "mcp__tax_tools__detect_wash_sales",
-        "mcp__tax_tools__calculate_tax",
     ],
     max_turns=8,
 )
@@ -156,8 +154,6 @@ When searching, use grep to find specific patterns in documents and calculate po
         "Grep",
         "Glob",
         "WebSearch",
-        "mcp__tax_tools__calculate_tax",
-        "mcp__tax_tools__check_limits",
     ],
     max_turns=10,
 )
@@ -296,8 +292,6 @@ Use tools to analyze transaction patterns and detect issues.
         "Read",
         "Grep",
         "Glob",
-        "mcp__tax_tools__detect_wash_sales",
-        "mcp__tax_tools__calculate_tax",
     ],
     max_turns=10,
 )
@@ -366,8 +360,6 @@ Use tools to verify contribution limits and analyze optimization opportunities.
         "Read",
         "Grep",
         "WebSearch",
-        "mcp__tax_tools__check_limits",
-        "mcp__tax_tools__calculate_tax",
     ],
     max_turns=8,
 )
@@ -433,7 +425,6 @@ Use tools to verify income reporting and identify missed deductions.
         "Read",
         "Grep",
         "Glob",
-        "mcp__tax_tools__calculate_tax",
     ],
     max_turns=8,
 )

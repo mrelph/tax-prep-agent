@@ -11,6 +11,26 @@ from typing import Any, AsyncIterator
 
 from tax_agent.config import get_config
 
+
+def _run_async(coro):
+    """Run an async coroutine from sync code, handling existing event loops.
+
+    If an event loop is already running (e.g. Jupyter, FastAPI),
+    creates a new thread to run the coroutine. Otherwise uses asyncio.run().
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+    else:
+        return asyncio.run(coro)
+
 # Model mapping (same as agent.py for consistency)
 AGENT_SDK_MODELS = {
     "claude-opus-4-5": "claude-opus-4-5-20251101",
@@ -216,7 +236,7 @@ class TaxAgentSDK:
                 subagent_name, prompt, source_dir
             ):
                 chunks.append(chunk)
-        asyncio.run(collect())
+        _run_async(collect())
         return "".join(chunks)
 
     async def classify_document_async(
@@ -435,7 +455,7 @@ Question/Request:
 
     def classify_document(self, text: str, file_path: Path | None = None) -> dict:
         """Synchronous wrapper for classify_document_async."""
-        return asyncio.run(self.classify_document_async(text, file_path))
+        return _run_async(self.classify_document_async(text, file_path))
 
     def analyze_documents(
         self,
@@ -450,7 +470,7 @@ Question/Request:
                 documents_summary, taxpayer_info, source_dir
             ):
                 chunks.append(chunk)
-        asyncio.run(collect())
+        _run_async(collect())
         return "".join(chunks)
 
     def review_return(
@@ -466,7 +486,7 @@ Question/Request:
                 return_text, source_documents, source_dir
             ):
                 chunks.append(chunk)
-        asyncio.run(collect())
+        _run_async(collect())
         return "".join(chunks)
 
     def interactive_query(
@@ -482,7 +502,7 @@ Question/Request:
                 query_text, context, source_dir
             ):
                 chunks.append(chunk)
-        asyncio.run(collect())
+        _run_async(collect())
         return "".join(chunks)
 
     def _parse_json_response(self, text: str) -> dict:
