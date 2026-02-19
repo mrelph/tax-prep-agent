@@ -2,7 +2,7 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FilingStatus(str, Enum):
@@ -129,5 +129,4 @@ class TaxpayerProfile(BaseModel):
 
         return "\n".join(lines)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
