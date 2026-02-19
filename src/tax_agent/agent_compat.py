@@ -50,6 +50,50 @@ class TaxAgentInterface(Protocol):
         """Extract 1099-B data."""
         ...
 
+    def extract_1099_nec_data(self, text: str) -> dict:
+        """Extract 1099-NEC data."""
+        ...
+
+    def extract_1099_r_data(self, text: str) -> dict:
+        """Extract 1099-R data."""
+        ...
+
+    def extract_1098_data(self, text: str) -> dict:
+        """Extract 1098 data."""
+        ...
+
+    def extract_w2_g_data(self, text: str) -> dict:
+        """Extract W-2G data."""
+        ...
+
+    def extract_1099_misc_data(self, text: str) -> dict:
+        """Extract 1099-MISC data."""
+        ...
+
+    def extract_1099_g_data(self, text: str) -> dict:
+        """Extract 1099-G data."""
+        ...
+
+    def extract_1099_k_data(self, text: str) -> dict:
+        """Extract 1099-K data."""
+        ...
+
+    def extract_1098_t_data(self, text: str) -> dict:
+        """Extract 1098-T data."""
+        ...
+
+    def extract_1098_e_data(self, text: str) -> dict:
+        """Extract 1098-E data."""
+        ...
+
+    def extract_5498_data(self, text: str) -> dict:
+        """Extract 5498 data."""
+        ...
+
+    def extract_k1_data(self, text: str) -> dict:
+        """Extract K-1 data."""
+        ...
+
     def analyze_tax_implications(
         self,
         documents_summary: str,
@@ -160,6 +204,50 @@ class CompatibleAgent:
     def extract_1099_b_data(self, text: str) -> dict:
         """Extract 1099-B data."""
         return self.legacy_agent.extract_1099_b_data(text)
+
+    def extract_1099_nec_data(self, text: str) -> dict:
+        """Extract 1099-NEC data."""
+        return self.legacy_agent.extract_1099_nec_data(text)
+
+    def extract_1099_r_data(self, text: str) -> dict:
+        """Extract 1099-R data."""
+        return self.legacy_agent.extract_1099_r_data(text)
+
+    def extract_1098_data(self, text: str) -> dict:
+        """Extract 1098 data."""
+        return self.legacy_agent.extract_1098_data(text)
+
+    def extract_w2_g_data(self, text: str) -> dict:
+        """Extract W-2G data."""
+        return self.legacy_agent.extract_w2_g_data(text)
+
+    def extract_1099_misc_data(self, text: str) -> dict:
+        """Extract 1099-MISC data."""
+        return self.legacy_agent.extract_1099_misc_data(text)
+
+    def extract_1099_g_data(self, text: str) -> dict:
+        """Extract 1099-G data."""
+        return self.legacy_agent.extract_1099_g_data(text)
+
+    def extract_1099_k_data(self, text: str) -> dict:
+        """Extract 1099-K data."""
+        return self.legacy_agent.extract_1099_k_data(text)
+
+    def extract_1098_t_data(self, text: str) -> dict:
+        """Extract 1098-T data."""
+        return self.legacy_agent.extract_1098_t_data(text)
+
+    def extract_1098_e_data(self, text: str) -> dict:
+        """Extract 1098-E data."""
+        return self.legacy_agent.extract_1098_e_data(text)
+
+    def extract_5498_data(self, text: str) -> dict:
+        """Extract 5498 data."""
+        return self.legacy_agent.extract_5498_data(text)
+
+    def extract_k1_data(self, text: str) -> dict:
+        """Extract K-1 data."""
+        return self.legacy_agent.extract_k1_data(text)
 
     # Analysis methods
 

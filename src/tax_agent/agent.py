@@ -774,6 +774,320 @@ Use null for any field you cannot find. Only output the JSON object."""
         except json.JSONDecodeError:
             return {}
 
+    def extract_w2_g_data(self, text: str) -> dict:
+        """Extract structured data from a W-2G form (gambling winnings)."""
+        system = """You are a tax document data extractor specializing in W-2G forms.
+
+Extract all relevant data and return a JSON object with:
+- payer_name: Name of the payer (casino, lottery, etc.)
+- payer_ein: Payer's TIN
+- winner_ssn_last4: Last 4 digits of winner SSN only
+- winner_name: Winner name
+- box_1: Reportable winnings (number)
+- box_2: Date won (string or null)
+- box_3: Type of wager (string or null)
+- box_4: Federal income tax withheld (number or null)
+- box_5: Transaction (string or null)
+- box_6: Race (string or null)
+- box_7: Winnings from identical wagers (number or null)
+- box_13: State tax withheld (number or null)
+- state: State abbreviation if present
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract W-2G data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1099_misc_data(self, text: str) -> dict:
+        """Extract structured data from a 1099-MISC form."""
+        system = """You are a tax document data extractor specializing in 1099-MISC forms.
+
+Extract all relevant data and return a JSON object with:
+- payer_name: Name of the payer
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- box_1: Rents (number or null)
+- box_2: Royalties (number or null)
+- box_3: Other income (number or null)
+- box_4: Federal income tax withheld (number or null)
+- box_5: Fishing boat proceeds (number or null)
+- box_6: Medical and health care payments (number or null)
+- box_8: Substitute payments in lieu of dividends (number or null)
+- box_9: Crop insurance proceeds (number or null)
+- box_10: Gross proceeds to attorney (number or null)
+- box_11: Fish purchased for resale (number or null)
+- box_12: Section 409A deferrals (number or null)
+- box_14: Excess golden parachute payments (number or null)
+- state: State abbreviation if present
+- state_tax_withheld: State tax withheld (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1099-MISC data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1099_g_data(self, text: str) -> dict:
+        """Extract structured data from a 1099-G form (government payments)."""
+        system = """You are a tax document data extractor specializing in 1099-G forms.
+
+Extract all relevant data and return a JSON object with:
+- payer_name: Name of the government agency
+- payer_ein: Payer's TIN
+- recipient_ssn_last4: Last 4 digits of recipient SSN only
+- recipient_name: Recipient name
+- box_1: Unemployment compensation (number or null)
+- box_2: State or local income tax refunds (number or null)
+- box_3: Box 2 amount is for tax year (string or null)
+- box_4: Federal income tax withheld (number or null)
+- box_5: RTAA payments (number or null)
+- box_6: Taxable grants (number or null)
+- box_7: Agriculture payments (number or null)
+- box_8: Check if box 2 is trade or business income (boolean)
+- box_9: Market gain (number or null)
+- state: State abbreviation if present
+- state_tax_withheld: State tax withheld (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1099-G data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1099_k_data(self, text: str) -> dict:
+        """Extract structured data from a 1099-K form (payment card transactions)."""
+        system = """You are a tax document data extractor specializing in 1099-K forms.
+
+Extract all relevant data and return a JSON object with:
+- filer_name: Name of the payment settlement entity
+- filer_ein: Filer's TIN
+- payee_ssn_last4: Last 4 digits of payee SSN only
+- payee_name: Payee name
+- box_1a: Gross amount of payment card/third party transactions (number)
+- box_1b: Card not present transactions (number or null)
+- box_2: Merchant category code (string or null)
+- box_3: Number of payment transactions (number or null)
+- box_4: Federal income tax withheld (number or null)
+- box_5a: January (number or null)
+- box_5b: February (number or null)
+- box_5c: March (number or null)
+- box_5d: April (number or null)
+- box_5e: May (number or null)
+- box_5f: June (number or null)
+- box_5g: July (number or null)
+- box_5h: August (number or null)
+- box_5i: September (number or null)
+- box_5j: October (number or null)
+- box_5k: November (number or null)
+- box_5l: December (number or null)
+- state: State abbreviation if present
+- state_tax_withheld: State tax withheld (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1099-K data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1098_t_data(self, text: str) -> dict:
+        """Extract structured data from a 1098-T form (tuition statement)."""
+        system = """You are a tax document data extractor specializing in 1098-T forms.
+
+Extract all relevant data and return a JSON object with:
+- filer_name: Name of the educational institution
+- filer_ein: Institution's TIN
+- student_ssn_last4: Last 4 digits of student SSN only
+- student_name: Student name
+- box_1: Payments received for qualified tuition (number or null)
+- box_2: Amounts billed for qualified tuition (number or null)
+- box_3: Change in reporting method (boolean or null)
+- box_4: Adjustments made for a prior year (number or null)
+- box_5: Scholarships or grants (number or null)
+- box_6: Adjustments to scholarships for a prior year (number or null)
+- box_7: Checkbox amounts include next year beginning Jan-Mar (boolean or null)
+- box_8: At least half-time student (boolean or null)
+- box_9: Graduate student (boolean or null)
+- box_10: Insurance contract reimbursement (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1098-T data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_1098_e_data(self, text: str) -> dict:
+        """Extract structured data from a 1098-E form (student loan interest)."""
+        system = """You are a tax document data extractor specializing in 1098-E forms.
+
+Extract all relevant data and return a JSON object with:
+- lender_name: Name of the lender/loan servicer
+- lender_ein: Lender's TIN
+- borrower_ssn_last4: Last 4 digits of borrower SSN only
+- borrower_name: Borrower name
+- box_1: Student loan interest received by lender (number)
+- box_2: Checkbox if box 1 does not include loan origination fees (boolean or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 1098-E data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_5498_data(self, text: str) -> dict:
+        """Extract structured data from a 5498 form (IRA contributions)."""
+        system = """You are a tax document data extractor specializing in 5498 forms.
+
+Extract all relevant data and return a JSON object with:
+- trustee_name: Name of the IRA trustee/issuer
+- trustee_ein: Trustee's TIN
+- participant_ssn_last4: Last 4 digits of participant SSN only
+- participant_name: Participant name
+- box_1: IRA contributions (number or null)
+- box_2: Rollover contributions (number or null)
+- box_3: Roth IRA conversion amount (number or null)
+- box_4: Recharacterized contributions (number or null)
+- box_5: Fair market value of account (number or null)
+- box_6: Life insurance cost (number or null)
+- box_7: IRA type checkbox (string: "IRA", "SEP", "SIMPLE", "Roth IRA", or null)
+- box_8: SEP contributions (number or null)
+- box_9: SIMPLE contributions (number or null)
+- box_10: Roth IRA contributions (number or null)
+- box_11: RMD check for next year (boolean or null)
+- box_12a: RMD date (string or null)
+- box_12b: RMD amount (number or null)
+- box_13a: Postponed/late contribution (number or null)
+- box_14a: Repayments (number or null)
+- box_15a: FMV of certain specified assets (number or null)
+- box_15b: Code (string or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract 5498 data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
+    def extract_k1_data(self, text: str) -> dict:
+        """Extract structured data from a Schedule K-1 (partnership/S-corp income)."""
+        system = """You are a tax document data extractor specializing in Schedule K-1 forms.
+This covers K-1 from Form 1065 (partnership) and Form 1120-S (S corporation).
+
+Extract all relevant data and return a JSON object with:
+- entity_name: Name of the partnership or S corporation
+- entity_ein: Entity's TIN
+- partner_ssn_last4: Last 4 digits of partner/shareholder SSN only
+- partner_name: Partner/shareholder name
+- form_type: "1065" (partnership) or "1120S" (S corp)
+- tax_year: Tax year
+- box_1: Ordinary business income/loss (number or null)
+- box_2: Net rental real estate income/loss (number or null)
+- box_3: Other net rental income/loss (number or null)
+- box_4: Guaranteed payments (number or null)
+- box_5: Interest income (number or null)
+- box_6a: Ordinary dividends (number or null)
+- box_6b: Qualified dividends (number or null)
+- box_7: Royalties (number or null)
+- box_8: Net short-term capital gain/loss (number or null)
+- box_9a: Net long-term capital gain/loss (number or null)
+- box_10: Net section 1231 gain/loss (number or null)
+- box_11: Other income/loss (number or null)
+- box_12: Section 179 deduction (number or null)
+- box_13: Other deductions (number or null)
+- box_14: Self-employment earnings (number or null)
+- box_15: Credits (number or null)
+- box_16: Foreign transactions (number or null)
+- box_19: Distributions (number or null)
+- partner_share_profit: Partner's share of profit percentage (number or null)
+- partner_share_loss: Partner's share of loss percentage (number or null)
+- partner_share_capital: Partner's share of capital percentage (number or null)
+
+Use null for any field you cannot find. Only output the JSON object."""
+
+        user_message = f"Extract Schedule K-1 data from:\n\n{text}"
+        response = self._call(system, user_message)
+
+        import json
+        try:
+            response = response.strip()
+            if response.startswith("```"):
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+            return json.loads(response)
+        except json.JSONDecodeError:
+            return {}
+
     def analyze_tax_implications(self, documents_summary: str, taxpayer_info: str) -> str:
         """
         Analyze tax implications based on collected documents.

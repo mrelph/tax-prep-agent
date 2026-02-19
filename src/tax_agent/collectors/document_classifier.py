@@ -315,6 +315,22 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
             return self.agent.extract_1099_r_data(text)
         elif doc_type == DocumentType.FORM_1098:
             return self.agent.extract_1098_data(text)
+        elif doc_type == DocumentType.W2_G:
+            return self.agent.extract_w2_g_data(text)
+        elif doc_type == DocumentType.FORM_1099_MISC:
+            return self.agent.extract_1099_misc_data(text)
+        elif doc_type == DocumentType.FORM_1099_G:
+            return self.agent.extract_1099_g_data(text)
+        elif doc_type == DocumentType.FORM_1099_K:
+            return self.agent.extract_1099_k_data(text)
+        elif doc_type == DocumentType.FORM_1098_T:
+            return self.agent.extract_1098_t_data(text)
+        elif doc_type == DocumentType.FORM_1098_E:
+            return self.agent.extract_1098_e_data(text)
+        elif doc_type == DocumentType.FORM_5498:
+            return self.agent.extract_5498_data(text)
+        elif doc_type == DocumentType.K1:
+            return self.agent.extract_k1_data(text)
         else:
             return {}
 
