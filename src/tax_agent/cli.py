@@ -349,7 +349,8 @@ def main(
     Run without arguments to start interactive mode.
     """
     if version:
-        rprint("tax-agent version 0.1.0")
+        from tax_agent import __version__
+        rprint(f"tax-agent version {__version__}")
         raise typer.Exit()
 
     # If no command provided, start interactive mode
@@ -3749,6 +3750,60 @@ def drive_collect(
     except Exception as e:
         rprint(f"[red]Error processing Drive folder: {e}[/red]")
         raise typer.Exit(1)
+
+
+@app.command()
+def update(
+    check: Annotated[bool, typer.Option("--check", help="Only check for updates, don't install")] = False,
+) -> None:
+    """Check for and install updates."""
+    from tax_agent.updater import check_for_updates, get_install_type, perform_update
+
+    console = Console()
+    install_type = get_install_type()
+
+    if install_type == "pip":
+        rprint("[yellow]tax-agent was installed via pip/pipx (no git repo).[/yellow]")
+        rprint("To enable self-updates, re-install with:")
+        rprint("  [cyan]curl -sSL https://raw.githubusercontent.com/mrelph/tax-prep-agent/main/install.sh | bash[/cyan]")
+        raise typer.Exit(1)
+
+    if check:
+        with console.status("[cyan]Checking for updates...[/cyan]"):
+            result = check_for_updates()
+
+        if result.error:
+            rprint(f"[red]Error: {result.error}[/red]")
+            raise typer.Exit(1)
+
+        if not result.updated:
+            rprint(f"[green]Already up to date[/green] ({result.old_ref})")
+            return
+
+        rprint(f"[yellow]Update available:[/yellow] {result.old_ref} → {result.new_ref}")
+        if result.commit_summary:
+            rprint("\n[bold]Changes:[/bold]")
+            for line in result.commit_summary:
+                rprint(f"  {line}")
+        rprint("\nRun [cyan]tax-agent update[/cyan] to install.")
+        return
+
+    with console.status("[cyan]Checking for updates...[/cyan]"):
+        result = perform_update()
+
+    if result.error:
+        rprint(f"[red]Error: {result.error}[/red]")
+        raise typer.Exit(1)
+
+    if not result.updated:
+        rprint(f"[green]Already up to date[/green] ({result.old_ref})")
+        return
+
+    rprint(f"[green]Updated successfully:[/green] {result.old_ref} → {result.new_ref}")
+    if result.commit_summary:
+        rprint("\n[bold]Changes:[/bold]")
+        for line in result.commit_summary:
+            rprint(f"  {line}")
 
 
 if __name__ == "__main__":
