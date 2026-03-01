@@ -5,7 +5,33 @@ import os
 from pathlib import Path
 from typing import Any
 
+import logging
+
 import keyring
+import keyring.backend
+
+logger = logging.getLogger(__name__)
+
+
+def _check_keyring_backend() -> None:
+    """Warn if using a plaintext file backend (WSL2/headless Linux)."""
+    backend = keyring.get_keyring()
+    backend_name = type(backend).__name__
+    if "Plaintext" in backend_name:
+        logger.info(
+            "No system keyring found; using file-based credential storage at "
+            "~/.local/share/python_keyring/keyring_pass.cfg. "
+            "Credentials are protected by filesystem permissions only."
+        )
+    elif "Fail" in backend_name or "fail" in type(backend).__module__:
+        raise RuntimeError(
+            "No keyring backend available. Install a system keyring "
+            "(gnome-keyring, kwallet) or ensure keyrings-alt is installed: "
+            "pip install keyrings-alt"
+        )
+
+
+_check_keyring_backend()
 
 APP_NAME = "tax-prep-agent"
 DEFAULT_CONFIG_DIR = Path.home() / ".tax-agent"

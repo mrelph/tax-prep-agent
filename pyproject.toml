@@ -42,6 +42,7 @@ dependencies = [
     "fpdf2>=2.7.0",  # For PDF report generation
     "prompt_toolkit>=3.0.0",  # For interactive mode with autocomplete
     "httpx>=0.27.0",  # For Brave Search API calls
+    "keyrings-alt>=5.0.2",  # File-based keyring fallback for WSL2/headless Linux
 ]
 
 [project.optional-dependencies]
