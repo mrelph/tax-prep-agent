@@ -824,6 +824,16 @@ def status() -> None:
         else:
             table.add_row("API Key", "[red]Not set[/red]")
 
+    # Source directory for active year
+    source_dir = config.get_source_directory(config.tax_year)
+    if source_dir:
+        status_str = str(source_dir)
+        if not source_dir.is_dir():
+            status_str += " [red](missing)[/red]"
+        table.add_row(f"Source Dir ({config.tax_year})", status_str)
+    else:
+        table.add_row(f"Source Dir ({config.tax_year})", "[dim]Not set[/dim]")
+
     table.add_row("Data Directory", str(config.data_dir))
 
     console.print(table)
