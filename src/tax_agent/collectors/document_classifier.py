@@ -425,6 +425,11 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         return results
 
 
+def get_document_collector() -> DocumentCollector:
+    """Factory function to create a DocumentCollector instance."""
+    return DocumentCollector()
+
+
 def collect_document(file_path: str | Path, tax_year: int | None = None) -> TaxDocument:
     """
     Convenience function to collect a single document.

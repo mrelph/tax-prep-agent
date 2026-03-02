@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from pathlib import Path
 
+from tax_agent.collectors.document_classifier import get_document_collector
+from tax_agent.config import get_config
+
 
 @dataclass
 class SlashCommand:
@@ -607,8 +610,38 @@ def _format_folder_tree(docs: list) -> str:
 
 def cmd_collect(args: list[str], context: dict) -> str:
     """Collect a tax document."""
+    config = get_config()
+
     if not args:
-        return "Usage: /collect <file_path> [--year YEAR]\n\nExample: /collect ~/Downloads/w2.pdf --year 2024"
+        # No args — try configured source directory
+        source_dir = config.get_source_directory(config.tax_year)
+        if source_dir is None:
+            return (
+                "No file specified and no source directory configured.\n\n"
+                "**Usage:** `/collect <file_path> [--year YEAR]`\n\n"
+                "**Or set a source directory:** `tax-agent source set <path>`"
+            )
+
+        if not source_dir.is_dir():
+            return f"Source directory no longer exists: {source_dir}\n\nUpdate with: `tax-agent source set <new_path>`"
+
+        collector = get_document_collector()
+        results = collector.process_directory(source_dir, config.tax_year, recursive=True)
+
+        if not results:
+            return f"No new documents found in {source_dir}"
+
+        lines = [f"Scanned **{source_dir}** for {config.tax_year}:\n"]
+        for file_path, result in results:
+            if isinstance(result, Exception):
+                lines.append(f"- {file_path.name}: {result}")
+            else:
+                from tax_agent.utils import get_enum_value
+                lines.append(f"- {file_path.name}: {get_enum_value(result.document_type)} from {result.issuer_name}")
+
+        success = sum(1 for _, r in results if not isinstance(r, Exception))
+        lines.append(f"\n**{success}/{len(results)}** files processed successfully.")
+        return "\n".join(lines)
 
     file_path = Path(args[0]).expanduser()
     year = None
@@ -625,10 +658,6 @@ def cmd_collect(args: list[str], context: dict) -> str:
     if not file_path.exists():
         return f"✗ File not found: {file_path}\n\n**Tip:** Use `/find` to search for tax documents"
 
-    from tax_agent.collectors.document_classifier import get_document_collector
-    from tax_agent.config import get_config
-
-    config = get_config()
     config_year = config.tax_year
 
     collector = get_document_collector()

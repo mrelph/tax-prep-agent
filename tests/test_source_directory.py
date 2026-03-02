@@ -234,3 +234,44 @@ class TestCollectFromSourceDir:
         result = runner.invoke(app, ["collect"])
         assert result.exit_code == 1
         assert "source" in result.stdout.lower()
+
+
+class TestSlashCollect:
+    def test_slash_collect_no_args_uses_source_dir(self, tmp_path, monkeypatch):
+        source = tmp_path / "taxes"
+        source.mkdir()
+        (source / "w2.pdf").touch()
+
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        config = Config(config_dir=config_dir)
+        config._config["initialized"] = True
+        config._config["source_directories"] = {"2024": str(source)}
+        config._save()
+
+        monkeypatch.setattr("tax_agent.slash_commands.get_config", lambda: config)
+
+        with patch("tax_agent.slash_commands.get_document_collector") as mock_get:
+            mock_collector = MagicMock()
+            mock_get.return_value = mock_collector
+            mock_collector.process_directory.return_value = []
+
+            from tax_agent.slash_commands import cmd_collect
+            result = cmd_collect([], {"tax_year": 2024})
+
+        mock_collector.process_directory.assert_called_once()
+        call_args = mock_collector.process_directory.call_args
+        assert call_args[0][0] == source
+        assert call_args[1].get("recursive") is True
+
+    def test_slash_collect_no_args_no_source_dir(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        config = Config(config_dir=config_dir)
+        config._config["initialized"] = True
+        config._save()
+        monkeypatch.setattr("tax_agent.slash_commands.get_config", lambda: config)
+
+        from tax_agent.slash_commands import cmd_collect
+        result = cmd_collect([], {"tax_year": 2024})
+        assert "source" in result.lower()
