@@ -93,6 +93,7 @@ class Config:
             "use_agent_sdk": True,  # SDK is primary, set False for legacy mode
             "agent_sdk_max_turns": 10,  # Maximum agentic turns
             "agent_sdk_allow_web": True,  # Allow web search/fetch tools
+            "source_directories": {},  # Per-tax-year source document directories
         }
 
     @property
@@ -298,6 +299,34 @@ class Config:
     def agent_sdk_allow_web(self, allowed: bool) -> None:
         """Enable or disable web tools for Agent SDK."""
         self.set("agent_sdk_allow_web", allowed)
+
+    def get_source_directory(self, year: int) -> Path | None:
+        """Get the source directory for a tax year."""
+        dirs = self._config.get("source_directories", {})
+        path_str = dirs.get(str(year))
+        return Path(path_str) if path_str else None
+
+    def set_source_directory(self, year: int, path: Path) -> None:
+        """Set the source directory for a tax year."""
+        path = Path(path).expanduser().resolve()
+        if not path.exists():
+            raise ValueError(f"Path does not exist: {path}")
+        if not path.is_dir():
+            raise ValueError(f"Path is not a directory: {path}")
+        dirs = self._config.setdefault("source_directories", {})
+        dirs[str(year)] = str(path)
+        self._save()
+
+    def clear_source_directory(self, year: int) -> None:
+        """Remove the source directory for a tax year."""
+        dirs = self._config.get("source_directories", {})
+        dirs.pop(str(year), None)
+        self._save()
+
+    def get_all_source_directories(self) -> dict[int, Path]:
+        """Get all configured source directories."""
+        dirs = self._config.get("source_directories", {})
+        return {int(y): Path(p) for y, p in dirs.items()}
 
     def to_dict(self) -> dict[str, Any]:
         """Return configuration as a dictionary (excluding secrets)."""
