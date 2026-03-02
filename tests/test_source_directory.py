@@ -5,8 +5,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from typer.testing import CliRunner
 
+from tax_agent.cli import app
 from tax_agent.config import Config
+
+runner = CliRunner()
 
 
 @pytest.fixture
@@ -129,3 +133,68 @@ class TestRecursiveDirectoryScan:
         assert "notes.txt" not in processed_names
         assert "w2.pdf" in processed_names
         assert "photo.png" in processed_names
+
+
+class TestSourceCLI:
+    def test_source_set(self, tmp_path, monkeypatch):
+        source = tmp_path / "taxes"
+        source.mkdir()
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        result = runner.invoke(app, ["source", "set", str(source)])
+        assert result.exit_code == 0
+        assert "2024" in result.stdout
+
+    def test_source_set_custom_year(self, tmp_path, monkeypatch):
+        source = tmp_path / "taxes"
+        source.mkdir()
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        result = runner.invoke(app, ["source", "set", str(source), "--year", "2023"])
+        assert result.exit_code == 0
+        assert "2023" in result.stdout
+
+    def test_source_set_nonexistent_dir(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        result = runner.invoke(app, ["source", "set", "/nonexistent/path"])
+        assert result.exit_code == 1
+
+    def test_source_show_empty(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        result = runner.invoke(app, ["source", "show"])
+        assert result.exit_code == 0
+        assert "No source directories" in result.stdout
+
+    def test_source_show_with_dirs(self, tmp_path, monkeypatch):
+        source = tmp_path / "taxes"
+        source.mkdir()
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        runner.invoke(app, ["source", "set", str(source)])
+        result = runner.invoke(app, ["source", "show"])
+        assert result.exit_code == 0
+        assert "2024" in result.stdout
+
+    def test_source_clear(self, tmp_path, monkeypatch):
+        source = tmp_path / "taxes"
+        source.mkdir()
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        runner.invoke(app, ["source", "set", str(source)])
+        result = runner.invoke(app, ["source", "clear"])
+        assert result.exit_code == 0
+        assert "Cleared" in result.stdout

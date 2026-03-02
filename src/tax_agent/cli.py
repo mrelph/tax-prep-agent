@@ -579,6 +579,75 @@ app.add_typer(drive_app, name="drive")
 app.add_typer(ai_app, name="ai")
 app.add_typer(context_app, name="context")
 
+source_app = typer.Typer(help="Manage source directories for tax documents")
+app.add_typer(source_app, name="source")
+
+
+@source_app.command("set")
+def source_set(
+    path: Annotated[Path, typer.Argument(help="Path to source directory")],
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year (defaults to active year)")] = None,
+) -> None:
+    """Set the source directory for a tax year."""
+    config = get_config()
+
+    if not config.is_initialized:
+        rprint("[red]Tax agent not initialized. Run 'tax-agent init' first.[/red]")
+        raise typer.Exit(1)
+
+    tax_year = year or config.tax_year
+
+    # Resolve path
+    resolved = Path(str(path).replace("~", str(Path.home())))
+    if not resolved.is_absolute():
+        resolved = Path.cwd() / resolved
+    resolved = resolved.resolve()
+
+    try:
+        config.set_source_directory(tax_year, resolved)
+    except ValueError as e:
+        rprint(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    rprint(f"[green]Source directory for {tax_year} set to: {resolved}[/green]")
+
+
+@source_app.command("show")
+def source_show() -> None:
+    """Show all configured source directories."""
+    config = get_config()
+    dirs = config.get_all_source_directories()
+
+    if not dirs:
+        rprint("[dim]No source directories configured.[/dim]")
+        rprint("[dim]Use 'tax-agent source set <path>' to configure one.[/dim]")
+        return
+
+    table = Table(title="Source Directories")
+    table.add_column("Tax Year", style="cyan")
+    table.add_column("Directory", style="green")
+    table.add_column("Status")
+
+    for yr in sorted(dirs.keys(), reverse=True):
+        path = dirs[yr]
+        exists = path.is_dir()
+        status = "[green]OK[/green]" if exists else "[red]Missing[/red]"
+        active = " [yellow](active)[/yellow]" if yr == config.tax_year else ""
+        table.add_row(f"{yr}{active}", str(path), status)
+
+    console.print(table)
+
+
+@source_app.command("clear")
+def source_clear(
+    year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year (defaults to active year)")] = None,
+) -> None:
+    """Clear the source directory for a tax year."""
+    config = get_config()
+    tax_year = year or config.tax_year
+    config.clear_source_directory(tax_year)
+    rprint(f"[green]Cleared source directory for {tax_year}.[/green]")
+
 
 @app.command()
 def init() -> None:
