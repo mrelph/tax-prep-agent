@@ -1,5 +1,6 @@
 """Tests for source directory configuration."""
 
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -198,3 +199,38 @@ class TestSourceCLI:
         result = runner.invoke(app, ["source", "clear"])
         assert result.exit_code == 0
         assert "Cleared" in result.stdout
+
+
+class TestCollectFromSourceDir:
+    def test_collect_no_args_uses_source_dir(self, tmp_path, monkeypatch):
+        """collect with no args should use the configured source directory."""
+        source = tmp_path / "taxes"
+        source.mkdir()
+        (source / "w2.pdf").touch()
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "data").mkdir(parents=True)
+        config_data = {"initialized": True, "tax_year": 2024, "source_directories": {"2024": str(source)}}
+        (config_dir / "config.json").write_text(json.dumps(config_data))
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+
+        with patch("tax_agent.collectors.document_classifier.DocumentCollector") as MockCollector:
+            mock_instance = MockCollector.return_value
+            mock_instance.process_directory.return_value = []
+            result = runner.invoke(app, ["collect"])
+
+        assert result.exit_code == 0
+        mock_instance.process_directory.assert_called_once()
+        call_args = mock_instance.process_directory.call_args
+        assert call_args[0][0] == source
+        assert call_args[1].get("recursive") is True
+
+    def test_collect_no_args_no_source_dir_shows_error(self, tmp_path, monkeypatch):
+        """collect with no args and no source dir should show helpful error."""
+        config_dir = tmp_path / ".tax-agent"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.json").write_text('{"initialized": true, "tax_year": 2024}')
+        monkeypatch.setattr("tax_agent.cli.get_config", lambda: Config(config_dir=config_dir))
+        result = runner.invoke(app, ["collect"])
+        assert result.exit_code == 1
+        assert "source" in result.stdout.lower()

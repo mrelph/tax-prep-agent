@@ -1007,12 +1007,16 @@ def chat(
 
 @app.command()
 def collect(
-    file: Annotated[Path, typer.Argument(help="Path to tax document (PDF or image)")],
+    file: Annotated[Optional[Path], typer.Argument(help="Path to tax document (PDF or image). Omit to use configured source directory.")] = None,
     year: Annotated[Optional[int], typer.Option("--year", "-y", help="Tax year")] = None,
     directory: Annotated[Optional[Path], typer.Option("--dir", "-d", help="Process all files in directory")] = None,
     replace: Annotated[bool, typer.Option("--replace", "-r", help="Replace existing document if duplicate")] = False,
 ) -> None:
-    """Collect and process a tax document."""
+    """Collect and process a tax document.
+
+    If no file is specified, uses the configured source directory for the active tax year.
+    Set a source directory with: tax-agent source set <path>
+    """
     from tax_agent.collectors.document_classifier import DocumentCollector
 
     config = get_config()
@@ -1023,6 +1027,44 @@ def collect(
 
     tax_year = year or config.tax_year
     collector = DocumentCollector()
+
+    # No file argument — use configured source directory
+    if file is None and directory is None:
+        source_dir = config.get_source_directory(tax_year)
+        if source_dir is None:
+            rprint(f"[red]No source directory configured for {tax_year}.[/red]")
+            rprint("[dim]Set one with: tax-agent source set <path>[/dim]")
+            raise typer.Exit(1)
+
+        if not source_dir.is_dir():
+            rprint(f"[red]Source directory no longer exists: {source_dir}[/red]")
+            rprint("[dim]Update with: tax-agent source set <new_path>[/dim]")
+            raise typer.Exit(1)
+
+        rprint(f"[cyan]Scanning source directory for {tax_year}: {source_dir}[/cyan]")
+        rprint("[dim]Skipping already-collected documents...[/dim]")
+
+        with console.status("[bold green]Processing files..."):
+            results = collector.process_directory(source_dir, tax_year, recursive=True)
+
+        if not results:
+            rprint("[dim]No new documents found.[/dim]")
+            return
+
+        for file_path, result in results:
+            if isinstance(result, Exception):
+                if "duplicate" in str(result).lower() or "already" in str(result).lower():
+                    rprint(f"[dim]  {file_path.name}: already collected[/dim]")
+                else:
+                    rprint(f"[red]  {file_path.name}: {result}[/red]")
+            else:
+                confidence = "high" if result.confidence_score >= 0.8 else "low"
+                review_flag = " [yellow](needs review)[/yellow]" if result.needs_review else ""
+                rprint(f"[green]  {file_path.name}: {get_enum_value(result.document_type)} from {result.issuer_name} ({confidence} confidence){review_flag}[/green]")
+
+        success_count = sum(1 for _, r in results if not isinstance(r, Exception))
+        rprint(f"\n[cyan]Processed {success_count}/{len(results)} files successfully.[/cyan]")
+        return
 
     if directory:
         # Process directory - resolve path first
