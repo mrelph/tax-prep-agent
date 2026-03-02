@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -64,3 +65,67 @@ class TestSourceDirectory:
         config.set_source_directory(2024, source)
         config2 = Config(config_dir=config.config_dir)
         assert config2.get_source_directory(2024) == source
+
+
+class TestRecursiveDirectoryScan:
+    def test_process_directory_flat_by_default(self, tmp_path):
+        """Flat scan should NOT find files in subdirectories."""
+        (tmp_path / "w2.pdf").touch()
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+        (subdir / "1099.pdf").touch()
+
+        with patch(
+            "tax_agent.collectors.document_classifier.DocumentCollector.process_file"
+        ) as mock_process:
+            mock_process.return_value = MagicMock()
+            from tax_agent.collectors.document_classifier import DocumentCollector
+            collector = DocumentCollector.__new__(DocumentCollector)
+            collector.config = MagicMock()
+            collector._agent = MagicMock()
+            results = collector.process_directory(tmp_path)
+
+        processed_paths = [call.args[0] for call in mock_process.call_args_list]
+        assert len(processed_paths) == 1
+        assert processed_paths[0].name == "w2.pdf"
+
+    def test_process_directory_recursive(self, tmp_path):
+        """Recursive scan should find files in subdirectories."""
+        (tmp_path / "w2.pdf").touch()
+        subdir = tmp_path / "sub"
+        subdir.mkdir()
+        (subdir / "1099.pdf").touch()
+
+        with patch(
+            "tax_agent.collectors.document_classifier.DocumentCollector.process_file"
+        ) as mock_process:
+            mock_process.return_value = MagicMock()
+            from tax_agent.collectors.document_classifier import DocumentCollector
+            collector = DocumentCollector.__new__(DocumentCollector)
+            collector.config = MagicMock()
+            collector._agent = MagicMock()
+            results = collector.process_directory(tmp_path, recursive=True)
+
+        processed_names = {call.args[0].name for call in mock_process.call_args_list}
+        assert processed_names == {"w2.pdf", "1099.pdf"}
+
+    def test_process_directory_recursive_skips_unsupported(self, tmp_path):
+        """Recursive scan should skip non-document files."""
+        (tmp_path / "w2.pdf").touch()
+        (tmp_path / "notes.txt").touch()
+        (tmp_path / "photo.png").touch()
+
+        with patch(
+            "tax_agent.collectors.document_classifier.DocumentCollector.process_file"
+        ) as mock_process:
+            mock_process.return_value = MagicMock()
+            from tax_agent.collectors.document_classifier import DocumentCollector
+            collector = DocumentCollector.__new__(DocumentCollector)
+            collector.config = MagicMock()
+            collector._agent = MagicMock()
+            results = collector.process_directory(tmp_path, recursive=True)
+
+        processed_names = {call.args[0].name for call in mock_process.call_args_list}
+        assert "notes.txt" not in processed_names
+        assert "w2.pdf" in processed_names
+        assert "photo.png" in processed_names

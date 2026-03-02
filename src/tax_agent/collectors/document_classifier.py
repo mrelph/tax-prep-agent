@@ -338,6 +338,7 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         self,
         directory: str | Path,
         tax_year: int | None = None,
+        recursive: bool = False,
     ) -> list[tuple[Path, TaxDocument | Exception]]:
         """
         Process all supported files in a directory.
@@ -345,6 +346,7 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         Args:
             directory: Path to directory
             tax_year: Tax year (defaults to config)
+            recursive: If True, scan subdirectories recursively
 
         Returns:
             List of (file_path, result) tuples where result is TaxDocument or Exception
@@ -356,7 +358,12 @@ If you find discrepancies, return corrected JSON. Otherwise confirm the data is 
         results: list[tuple[Path, TaxDocument | Exception]] = []
         supported_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif"}
 
-        for file_path in directory.iterdir():
+        if recursive:
+            files = (f for f in directory.rglob("*") if f.is_file())
+        else:
+            files = directory.iterdir()
+
+        for file_path in sorted(files):
             if file_path.suffix.lower() in supported_extensions:
                 try:
                     doc = self.process_file(file_path, tax_year)
