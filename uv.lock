@@ -1923,6 +1923,7 @@ dependencies = [
     { name = "httpx" },
     { name = "keyring" },
     { name = "keyrings-alt" },
+    { name = "mcp" },
     { name = "pdf2image" },
     { name = "pillow" },
     { name = "prompt-toolkit" },
@@ -1931,7 +1932,6 @@ dependencies = [
     { name = "pytesseract" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "sqlcipher3-binary" },
     { name = "typer" },
 ]
 
@@ -1941,6 +1941,9 @@ dev = [
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+encrypted = [
+    { name = "sqlcipher3-binary" },
 ]
 
 [package.metadata]
@@ -1955,6 +1958,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "keyring", specifier = ">=25.0.0" },
     { name = "keyrings-alt", specifier = ">=5.0.2" },
+    { name = "mcp", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "pdf2image", specifier = ">=1.16.0" },
     { name = "pillow", specifier = ">=10.0.0" },
@@ -1967,10 +1971,10 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
-    { name = "sqlcipher3-binary", specifier = ">=0.5.0" },
+    { name = "sqlcipher3-binary", marker = "extra == 'encrypted'", specifier = ">=0.5.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["encrypted", "dev"]
 
 [[package]]
 name = "tomli"
